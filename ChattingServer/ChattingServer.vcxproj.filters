@@ -8,5 +8,6 @@
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="ChattingServer.cpp" />
+    <ClCompile Include="Main.cpp" />
   </ItemGroup>
 </Project>

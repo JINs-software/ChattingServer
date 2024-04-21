@@ -3,6 +3,19 @@
 
 #include <minwindef.h>
 
+#define dfPACKET_CODE		0x77
+#define dfPACKET_KEY		0x32
+
+#define dfSECTOR_X_MAX		50
+#define dfSECTOR_Y_MAX		50
+
+struct stMSG_HDR {
+	BYTE	code;
+	USHORT	len;
+	BYTE	randKey;
+	BYTE	checkSum;
+};
+
 enum en_PACKET_TYPE
 {
 	////////////////////////////////////////////////////////
@@ -122,11 +135,6 @@ enum en_PACKET_TYPE
 
 //#endif
 
-struct MSG_HEADER {
-	UINT16 msgLength;
-	
-};
-
 struct MSG_PACKET_CS_CHAT_REQ_LOGIN {
 	WORD Type;
 	INT64 AccountNo;
@@ -134,24 +142,24 @@ struct MSG_PACKET_CS_CHAT_REQ_LOGIN {
 	WCHAR Nickname[20];		// null 포함
 	char sessinKey[64];		// 인증 토큰
 };
-struct en_PACKET_CS_CHAT_RES_LOGIN {
+struct MSG_PACKET_CS_CHAT_RES_LOGIN {
 	WORD	Type;
 	BYTE	Status;				// 0:실패	1:성공
 	INT64	AccountNo;
 };
-struct en_PACKET_CS_CHAT_REQ_SECTOR_MOVE {
+struct MSG_PACKET_CS_CHAT_REQ_SECTOR_MOVE {
 	WORD	Type;
 	INT64	AccountNo;
 	WORD	SectorX;
 	WORD	SectorY;
 };
-struct en_PACKET_CS_CHAT_RES_SECTOR_MOVE {
+struct MSG_PACKET_CS_CHAT_RES_SECTOR_MOVE {
 	WORD	Type;
 	INT64	AccountNo;
 	WORD	SectorX;
 	WORD	SectorY;
 };
-struct en_PACKET_CS_CHAT_REQ_MESSAGE {
+struct MSG_PACKET_CS_CHAT_REQ_MESSAGE {
 	WORD	Type;
 	INT64	AccountNo;
 	WORD	MessageLen;
@@ -159,7 +167,7 @@ struct en_PACKET_CS_CHAT_REQ_MESSAGE {
 	//WCHAR	Message[MessageLen / 2];		// null 미포함
 	WCHAR* Message;
 };
-struct en_PACKET_CS_CHAT_RES_MESSAGE {
+struct MSG_PACKET_CS_CHAT_RES_MESSAGE {
 	WORD	Type;
 	INT64	AccountNo;
 	WCHAR	ID[20];						// null 포함
@@ -170,6 +178,6 @@ struct en_PACKET_CS_CHAT_RES_MESSAGE {
 	//WCHAR	Message[MessageLen / 2];		// null 미포함
 	WCHAR* Message;
 };
-struct en_PACKET_CS_CHAT_REQ_HEARTBEAT {
+struct MSG_PACKET_CS_CHAT_REQ_HEARTBEAT {
 	WORD		Type;
 };
