@@ -49,8 +49,8 @@ private:
 	std::unordered_map<HANDLE, std::queue<stRecvInfo>>	m_ThreadEventRecvqMap;
 
 	// 세션 별 자료구조
-	std::set<UINT64> m_LoginWaitSessions;
-	std::mutex m_LoginWaitSessionsMtx;
+	std::set<UINT64>	m_LoginWaitSessions;
+	std::mutex			m_LoginWaitSessionsMtx;
 
 	std::unordered_map<UINT64, std::queue<JBuffer*>>		m_SessionMessageQueueMap;
 	std::unordered_map<UINT64, stAccoutInfo>				m_SessionIdAccountMap;
@@ -69,11 +69,11 @@ private:
 	void Encode(BYTE randKey, USHORT payloadLen, BYTE& checkSum, BYTE* payloads);
 
 	void Proc_REQ_LOGIN(UINT64 sessionID, MSG_PACKET_CS_CHAT_REQ_LOGIN& body);
-	void Send_RES_LOGIN(BYTE STATUS, INT64 AccountNo);
+	void Send_RES_LOGIN(UINT64 sessionID, BYTE STATUS, INT64 AccountNo);
 	void Proc_REQ_SECTOR_MOVE(UINT64 sessionID, MSG_PACKET_CS_CHAT_REQ_SECTOR_MOVE& body);
-	void Send_RES_SECTOR_MOVE(INT64 AccountNo, WORD SectorX, WORD SectorY);
+	void Send_RES_SECTOR_MOVE(UINT64 sessionID, INT64 AccountNo, WORD SectorX, WORD SectorY);
 	void Proc_REQ_MESSAGE(UINT64 sessionID, MSG_PACKET_CS_CHAT_REQ_MESSAGE& body);
-	void Send_RES_MESSAGE(INT64 AccountNo, WCHAR* ID, WCHAR Nickname, WORD MessageLen, WCHAR* Message);
+	void Send_RES_MESSAGE(UINT64 sessionID, INT64 AccountNo, WCHAR* ID, WCHAR Nickname, WORD MessageLen, WCHAR* Message);
 	void Proc_REQ_HEARTBEAT();
 
 };

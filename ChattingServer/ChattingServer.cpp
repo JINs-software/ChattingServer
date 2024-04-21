@@ -98,19 +98,15 @@ void ChattingServer::OnWorkerThreadStart() {
 
 bool ChattingServer::OnConnectionRequest()
 {
-	return false;
+	return true;
 }
 
 void ChattingServer::OnClientJoin(uint64 sessionID)
 {
-	// OnClientJoin 반환 전 해당 세션에 대한 OnRecv가 호출되지 않음을 보장.
-	// 세션 별 메시지 큐 관리 자료구조에 새로운 세션 별 메시지 큐를 삽입한다.
-
-	// (1) 세션 메시지 큐 생성
-	// (2) 세션 큐 관리 자료구조에 삽입
-	//	AcquireSRWLockExclusive(..)
-	//  자료구조 삽입
-	//  ReleaseSRWLockExclusive(..)
+	{
+		std::lock_guard<std::mutex> lockGuard(m_LoginWaitSessionsMtx);
+		m_LoginWaitSessions.insert(sessionID);
+	}
 }
 
 void ChattingServer::OnClientLeave(uint64 sessionID)
@@ -293,11 +289,11 @@ void ChattingServer::Proc_REQ_LOGIN(UINT64 sessionID, MSG_PACKET_CS_CHAT_REQ_LOG
 	ReleaseSRWLockExclusive(&m_SessionMessageqMapSrwLock);
 }
 
-void ChattingServer::Send_RES_LOGIN(BYTE STATUS, INT64 AccountNo)
+void ChattingServer::Send_RES_LOGIN(UINT64 sessionID, BYTE STATUS, INT64 AccountNo)
 {
 	// Unicast Reply
-
-	SendPacket()
+	
+	SendPacket(sessionID, )
 }
 
 void ChattingServer::Proc_REQ_SECTOR_MOVE(UINT64 sessionID, MSG_PACKET_CS_CHAT_REQ_SECTOR_MOVE& body)
@@ -319,7 +315,7 @@ void ChattingServer::Proc_REQ_SECTOR_MOVE(UINT64 sessionID, MSG_PACKET_CS_CHAT_R
 	}
 }
 
-void ChattingServer::Send_RES_SECTOR_MOVE(INT64 AccountNo, WORD SectorX, WORD SectorY)
+void ChattingServer::Send_RES_SECTOR_MOVE(UINT64 sessionID, INT64 AccountNo, WORD SectorX, WORD SectorY)
 {
 	// Unicast Reply
 }
@@ -328,7 +324,7 @@ void ChattingServer::Proc_REQ_MESSAGE(UINT64 sessionID, MSG_PACKET_CS_CHAT_REQ_M
 {
 }
 
-void ChattingServer::Send_RES_MESSAGE(INT64 AccountNo, WCHAR* ID, WCHAR Nickname, WORD MessageLen, WCHAR* Message)
+void ChattingServer::Send_RES_MESSAGE(UINT64 sessionID, INT64 AccountNo, WCHAR* ID, WCHAR Nickname, WORD MessageLen, WCHAR* Message)
 {
 	// Multicast Reply
 }
