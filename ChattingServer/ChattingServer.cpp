@@ -292,8 +292,13 @@ void ChattingServer::Proc_REQ_LOGIN(UINT64 sessionID, MSG_PACKET_CS_CHAT_REQ_LOG
 void ChattingServer::Send_RES_LOGIN(UINT64 sessionID, BYTE STATUS, INT64 AccountNo)
 {
 	// Unicast Reply
-	
-	SendPacket(sessionID, )
+	JBuffer* sendPacket = m_SerialBuffPoolMgr.GetTlsMemPool().AllocMem();
+	m_SerialBuffPoolMgr.GetTlsMemPool().IncrementRefCnt(sendPacket);
+
+	(*sendPacket) << (WORD)en_PACKET_CS_CHAT_RES_LOGIN << STATUS << AccountNo;
+	SendPacket(sessionID, sendPacket);
+
+	m_SerialBuffPoolMgr.GetTlsMemPool().FreeMem(sendPacket);
 }
 
 void ChattingServer::Proc_REQ_SECTOR_MOVE(UINT64 sessionID, MSG_PACKET_CS_CHAT_REQ_SECTOR_MOVE& body)
@@ -318,15 +323,45 @@ void ChattingServer::Proc_REQ_SECTOR_MOVE(UINT64 sessionID, MSG_PACKET_CS_CHAT_R
 void ChattingServer::Send_RES_SECTOR_MOVE(UINT64 sessionID, INT64 AccountNo, WORD SectorX, WORD SectorY)
 {
 	// Unicast Reply
+	JBuffer* sendPacket = m_SerialBuffPoolMgr.GetTlsMemPool().AllocMem();
+	m_SerialBuffPoolMgr.GetTlsMemPool().IncrementRefCnt(sendPacket);
+
+	(*sendPacket) << (WORD)en_PACKET_CS_CHAT_RES_SECTOR_MOVE << AccountNo << SectorX << SectorY;
+	SendPacket(sessionID, sendPacket);
+
+	m_SerialBuffPoolMgr.GetTlsMemPool().FreeMem(sendPacket);
 }
 
 void ChattingServer::Proc_REQ_MESSAGE(UINT64 sessionID, MSG_PACKET_CS_CHAT_REQ_MESSAGE& body)
 {
-}
+	TlsMemPool<JBuffer>& tlsMemPool = m_SerialBuffPoolMgr.GetTlsMemPool();
+	JBuffer* sendPacket = tlsMemPool.AllocMem();
+	tlsMemPool.IncrementRefCnt(sendPacket);
 
-void ChattingServer::Send_RES_MESSAGE(UINT64 sessionID, INT64 AccountNo, WCHAR* ID, WCHAR Nickname, WORD MessageLen, WCHAR* Message)
-{
-	// Multicast Reply
+	stAccoutInfo& accountInfo = m_SessionIdAccountMap[sessionID];
+
+	(*sendPacket) << (WORD)en_PACKET_CS_CHAT_RES_MESSAGE;
+	(*sendPacket) << accountInfo.AccountNo;
+	(*sendPacket) << accountInfo.ID;
+	(*sendPacket) << accountInfo.Nickname;
+	(*sendPacket) << body.MessageLen;
+	sendPacket->Enqueue((BYTE*)body.Message, body.MessageLen);
+
+	for (WORD y = accountInfo.Y - 1; y <= accountInfo.Y + 1; y++) {
+		for (WORD x = accountInfo.X - 1; x <= accountInfo.X + 1; x++) {
+			if (y < 0 || y > dfSECTOR_Y_MAX || x < 0 || x > dfSECTOR_X_MAX) {
+				continue;
+			}
+
+			std::set<UINT64>& sector = m_SectorMap[y][x];
+			for (auto iter = sector.begin(); iter != sector.end(); iter++) {
+				tlsMemPool.IncrementRefCnt(sendPacket);
+				SendPacket(*iter, sendPacket);
+			}
+		}
+	}
+
+	tlsMemPool.FreeMem(sendPacket);
 }
 
 void ChattingServer::Proc_REQ_HEARTBEAT()

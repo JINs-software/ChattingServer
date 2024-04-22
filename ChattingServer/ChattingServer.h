@@ -73,7 +73,6 @@ private:
 	void Proc_REQ_SECTOR_MOVE(UINT64 sessionID, MSG_PACKET_CS_CHAT_REQ_SECTOR_MOVE& body);
 	void Send_RES_SECTOR_MOVE(UINT64 sessionID, INT64 AccountNo, WORD SectorX, WORD SectorY);
 	void Proc_REQ_MESSAGE(UINT64 sessionID, MSG_PACKET_CS_CHAT_REQ_MESSAGE& body);
-	void Send_RES_MESSAGE(UINT64 sessionID, INT64 AccountNo, WCHAR* ID, WCHAR Nickname, WORD MessageLen, WCHAR* Message);
 	void Proc_REQ_HEARTBEAT();
 
 };
