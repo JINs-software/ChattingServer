@@ -29,6 +29,7 @@ void ChattingServer::ProcessMessage(UINT64 sessionID, size_t msgCnt)
 	// .. 세션 별 메시지 큐 삽입
 	AcquireSRWLockShared(&m_SessionMessageqMapSrwLock);									// <= 데드락 발생 시초				
 	std::queue<JBuffer*>& sessionMsgQ = m_SessionMessageQueueMap[sessionID];
+	ReleaseSRWLockShared(&m_SessionMessageqMapSrwLock);
 	for (size_t i = 0; i < msgCnt; i++) {
 		JBuffer* msg = sessionMsgQ.front();
 		sessionMsgQ.pop();
@@ -59,7 +60,6 @@ void ChattingServer::ProcessMessage(UINT64 sessionID, size_t msgCnt)
 			break;
 		}
 	}
-	ReleaseSRWLockShared(&m_SessionMessageqMapSrwLock);
 }
 
 void ChattingServer::ForwardChattingMessage(UINT64 sessionID, size_t recvSize)
@@ -344,6 +344,8 @@ void ChattingServer::Proc_REQ_LOGIN(UINT64 sessionID, MSG_PACKET_CS_CHAT_REQ_LOG
 	accountInfo.X = -1;
 	m_SessionIdAccountMap.insert({ sessionID, accountInfo});
 	ReleaseSRWLockExclusive(&m_SessionMessageqMapSrwLock);
+
+	Send_RES_LOGIN(sessionID, true, accountInfo.AccountNo);
 }
 
 void ChattingServer::Send_RES_LOGIN(UINT64 sessionID, BYTE STATUS, INT64 AccountNo)
