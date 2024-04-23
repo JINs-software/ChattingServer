@@ -14,7 +14,7 @@ UINT __stdcall ChattingServer::ProcessThreadFunc(void* arg)
 			size_t recvSize = recvInfo.recvMsgCnt;
 			recvQ.pop();
 
-			server->ForwardChattingMessage(sessionID, recvSize);
+			server->ProcessMessage(sessionID, recvSize);
 		}
 		else {
 			// WaitForMultipleObjects Error..
@@ -27,7 +27,7 @@ UINT __stdcall ChattingServer::ProcessThreadFunc(void* arg)
 void ChattingServer::ProcessMessage(UINT64 sessionID, size_t msgCnt)
 {
 	// .. 세션 별 메시지 큐 삽입
-	AcquireSRWLockShared(&m_SessionMessageqMapSrwLock);
+	AcquireSRWLockShared(&m_SessionMessageqMapSrwLock);									// <= 데드락 발생 시초				
 	std::queue<JBuffer*>& sessionMsgQ = m_SessionMessageQueueMap[sessionID];
 	for (size_t i = 0; i < msgCnt; i++) {
 		JBuffer* msg = sessionMsgQ.front();
@@ -80,16 +80,23 @@ bool ChattingServer::OnWorkerThreadCreate(HANDLE thHnd)
 	HANDLE recvEvent = CreateEvent(NULL, FALSE, FALSE, NULL);
 	UINT8 eventIdx = m_WorkerThreadCnt++;
 	m_WorkerThreadRecvEvents[eventIdx] = recvEvent;
-	thEventIndexMap.insert({ thHnd, recvEvent });
+	DWORD thID = GetThreadId(thHnd);
+	thEventIndexMap.insert({ thID, recvEvent });
 
+}
+
+void ChattingServer::OnWorkerThreadCreateDone()
+{
+	m_ProcessThreadHnd = (HANDLE)_beginthreadex(NULL, 0, ProcessThreadFunc, this, 0, NULL);
 }
 
 void ChattingServer::OnWorkerThreadStart() {
 	if (TlsGetValue(m_RecvEventTlsIndex) == NULL) {
-		HANDLE thEvent = thEventIndexMap[GetCurrentThread()];
-		TlsSetValue(m_RecvEventTlsIndex, thEvent);
+		DWORD thID = GetThreadId(GetCurrentThread());
+		HANDLE thEventHnd = thEventIndexMap[thID];
+		TlsSetValue(m_RecvEventTlsIndex, thEventHnd);
 
-		m_ThreadEventRecvqMap.insert({GetCurrentThread(), std::queue<stRecvInfo>()});
+		m_ThreadEventRecvqMap.insert({ thEventHnd, std::queue<stRecvInfo>()});
 	}
 	else {
 		DebugBreak();
@@ -136,34 +143,80 @@ void ChattingServer::OnRecv(uint64 sessionID, JBuffer& recvBuff)
 			// 메시지 미완성
 			break;
 		}
+		
+		//// 직렬화 버퍼 생성
+		//recvBuff >> msgHdr;
+		//JBuffer* message = new JBuffer(msgHdr.len);
+		//recvBuff.Dequeue(message->GetBeginBufferPtr(), msgHdr.len);
+		//message->DirectMoveEnqueueOffset(msgHdr.len);
+		//
+		//if (!Decode(msgHdr.randKey, msgHdr.len, msgHdr.checkSum, message->GetBeginBufferPtr())) {
+		//	// 디코딩 실패
+		//	// 연결 강제 종료
+		//	DebugBreak();
+		//	break;
+		//}
 
 		recvBuff >> msgHdr;
-
-		// 직렬화 버퍼 생성
-		JBuffer* message = new JBuffer(msgHdr.len);
-		recvBuff.Dequeue(message->GetBeginBufferPtr(), msgHdr.len);
-		message->DirectMoveEnqueueOffset(msgHdr.len);
-
-		if (!Decode(msgHdr.randKey, msgHdr.len, msgHdr.checkSum, message->GetBeginBufferPtr())) {
-			// 디코딩 실패
-			// 연결 강제 종료
-
-			break;
+		if (!Decode(msgHdr.randKey, msgHdr.len, msgHdr.checkSum, recvBuff.GetDequeueBufferPtr())) {
+			DebugBreak();
+			// 연결 강제 종료?
 		}
-	
-		// .. 세션 별 메시지 큐 삽입
-		AcquireSRWLockShared(&m_SessionMessageqMapSrwLock);
-		std::queue<JBuffer*>& sessinMsgQ = m_SessionMessageQueueMap[sessionID];
-		sessinMsgQ.push(message);
-		ReleaseSRWLockShared(&m_SessionMessageqMapSrwLock);
-		recvInfo.recvMsgCnt++;
+
+		while (recvBuff.GetUseSize() > 0) {
+			WORD type;
+			recvBuff.Peek(&type);
+
+			JBuffer* message = NULL;
+			switch (type)
+			{
+			case en_PACKET_CS_CHAT_REQ_LOGIN:
+			{
+				message = new JBuffer(sizeof(MSG_PACKET_CS_CHAT_REQ_LOGIN));
+				recvBuff.Dequeue(message->GetDequeueBufferPtr(), sizeof(MSG_PACKET_CS_CHAT_REQ_LOGIN));
+				message->DirectMoveEnqueueOffset(sizeof(MSG_PACKET_CS_CHAT_REQ_LOGIN));
+			}
+				break;
+			case en_PACKET_CS_CHAT_REQ_SECTOR_MOVE:
+			{
+				message = new JBuffer(sizeof(MSG_PACKET_CS_CHAT_REQ_SECTOR_MOVE));
+				recvBuff.Dequeue(message->GetDequeueBufferPtr(), sizeof(MSG_PACKET_CS_CHAT_REQ_SECTOR_MOVE));
+				message->DirectMoveEnqueueOffset(sizeof(MSG_PACKET_CS_CHAT_REQ_SECTOR_MOVE));
+			}
+				break;
+			case en_PACKET_CS_CHAT_REQ_MESSAGE:
+			{
+				WORD messageLen;
+				recvBuff.Peek(sizeof(WORD) + sizeof(INT64), (BYTE*)&messageLen, sizeof(WORD));
+
+				message = new JBuffer(sizeof(MSG_PACKET_CS_CHAT_REQ_MESSAGE) + messageLen);
+				recvBuff.Dequeue(message->GetDequeueBufferPtr(), sizeof(MSG_PACKET_CS_CHAT_REQ_MESSAGE) + messageLen);
+				message->DirectMoveEnqueueOffset(sizeof(MSG_PACKET_CS_CHAT_REQ_MESSAGE) + messageLen);
+			}
+				break;
+			case en_PACKET_CS_CHAT_REQ_HEARTBEAT:
+				break;
+			default:
+				DebugBreak();
+				break;
+			}
+			
+
+			if (message != NULL) {
+				// .. 세션 별 메시지 큐 삽입
+				AcquireSRWLockShared(&m_SessionMessageqMapSrwLock);
+				std::queue<JBuffer*>& sessinMsgQ = m_SessionMessageQueueMap[sessionID];
+				sessinMsgQ.push(message);
+				ReleaseSRWLockShared(&m_SessionMessageqMapSrwLock);
+				recvInfo.recvMsgCnt++;
+			}
+		}
 	}
 
 	if (recvInfo.recvMsgCnt > 0) {
-		std::queue<stRecvInfo>& recvInfoQ = m_ThreadEventRecvqMap[thHnd];
-		recvInfoQ.push(recvInfo);
-
 		HANDLE recvEvent = (HANDLE)TlsGetValue(m_RecvEventTlsIndex);
+		std::queue<stRecvInfo>& recvInfoQ = m_ThreadEventRecvqMap[recvEvent];
+		recvInfoQ.push(recvInfo);
 		SetEvent(recvEvent);
 	}
 
@@ -225,20 +278,24 @@ void ChattingServer::OnError()
 //----------------------------------------------------------------------------------------------------------
 bool ChattingServer::Decode(BYTE randKey, USHORT payloadLen, BYTE checkSum, BYTE* payloads)
 {
-	BYTE Eb = checkSum;
 	BYTE Pb = checkSum ^ (dfPACKET_KEY + 1);
 	BYTE payloadSum = Pb ^ (randKey + 1);
+	BYTE Eb = checkSum;
 
 	for (USHORT i = 1; i <= payloadLen; i++) {
-		BYTE En = payloads[i - 1];
-		BYTE Pn = En ^ (Eb + dfPACKET_KEY + (BYTE)(i + 1));
-		payloads[i - 1] = Pn ^ (Pb + randKey, (BYTE)(i + 1));
+		BYTE Pn = payloads[i - 1] ^ (Eb + dfPACKET_KEY + (BYTE)(i + 1));
+		BYTE Dn = Pn ^ (Pb + randKey + (BYTE)(i + 1));
+
+		Pb = Pn;
+		Eb = payloads[i - 1];
+		payloads[i - 1] = Dn;
 	}
 
 	// checksum 검증
 	BYTE payloadSumCmp = 0;
 	for (USHORT i = 0; i < payloadLen; i++) {
 		payloadSumCmp += payloads[i];
+		payloadSumCmp %= 256;
 	}
 	if (payloadSum != payloadSumCmp) {
 		DebugBreak();
@@ -345,7 +402,9 @@ void ChattingServer::Proc_REQ_MESSAGE(UINT64 sessionID, MSG_PACKET_CS_CHAT_REQ_M
 	(*sendPacket) << accountInfo.ID;
 	(*sendPacket) << accountInfo.Nickname;
 	(*sendPacket) << body.MessageLen;
-	sendPacket->Enqueue((BYTE*)body.Message, body.MessageLen);
+	
+	//sendPacket->Enqueue((BYTE*)body.Message, body.MessageLen);
+	DebugBreak();
 
 	for (WORD y = accountInfo.Y - 1; y <= accountInfo.Y + 1; y++) {
 		for (WORD x = accountInfo.X - 1; x <= accountInfo.X + 1; x++) {

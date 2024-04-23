@@ -9,13 +9,6 @@
 #define dfSECTOR_X_MAX		50
 #define dfSECTOR_Y_MAX		50
 
-struct stMSG_HDR {
-	BYTE	code;
-	USHORT	len;
-	BYTE	randKey;
-	BYTE	checkSum;
-};
-
 enum en_PACKET_TYPE
 {
 	////////////////////////////////////////////////////////
@@ -135,6 +128,15 @@ enum en_PACKET_TYPE
 
 //#endif
 
+#pragma pack(push, 1)
+
+struct stMSG_HDR {
+	BYTE	code;
+	USHORT	len;
+	BYTE	randKey;
+	BYTE	checkSum;
+};
+
 struct MSG_PACKET_CS_CHAT_REQ_LOGIN {
 	WORD Type;
 	INT64 AccountNo;
@@ -165,7 +167,7 @@ struct MSG_PACKET_CS_CHAT_REQ_MESSAGE {
 	WORD	MessageLen;
 
 	//WCHAR	Message[MessageLen / 2];		// null ¹ÌÆ÷ÇÔ
-	WCHAR* Message;
+	//WCHAR* Message;
 };
 struct MSG_PACKET_CS_CHAT_RES_MESSAGE {
 	WORD	Type;
@@ -181,3 +183,5 @@ struct MSG_PACKET_CS_CHAT_RES_MESSAGE {
 struct MSG_PACKET_CS_CHAT_REQ_HEARTBEAT {
 	WORD		Type;
 };
+
+#pragma pack(pop)

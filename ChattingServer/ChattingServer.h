@@ -27,7 +27,8 @@ public:
 
 private:
 	virtual bool OnWorkerThreadCreate(HANDLE thHnd) override;
-	virtual void OnWorkerThreadStart();
+	virtual void OnWorkerThreadCreateDone() override;
+	virtual void OnWorkerThreadStart() override;
 	virtual bool OnConnectionRequest(/*IP, Port*/) override;
 	virtual void OnClientJoin(UINT64 sessionID) override;
 	virtual void OnClientLeave(UINT64 sessionID) override;
@@ -43,7 +44,10 @@ private:
 	// IOCP 작업자 스레드의 수신 이벤트 배열
 	HANDLE	m_WorkerThreadRecvEvents[MAX_WORKER_THREAD_CNT];
 	// 작업자 스레드 <-> 작업자 스레드 사용 수신 이벤트 초기 연결용 맵
-	std::map<HANDLE, HANDLE> thEventIndexMap;	
+	//std::map<HANDLE, HANDLE> thEventIndexMap;
+	// 작업자 스레드에서 key 획득을 위해 호출하는 GetCurrentThread 함수는 의사 핸들 반환
+	// 따라서 key는 스레드 핸들이 아닌 스레드 ID로 변경
+	std::map<DWORD, HANDLE> thEventIndexMap;
 
 	// 작업자 스레드 수신 이벤트 <-> RecvInfo 큐 맵핑
 	std::unordered_map<HANDLE, std::queue<stRecvInfo>>	m_ThreadEventRecvqMap;
@@ -56,7 +60,8 @@ private:
 	std::unordered_map<UINT64, stAccoutInfo>				m_SessionIdAccountMap;
 	SRWLOCK	m_SessionMessageqMapSrwLock;
 
-	// Process 자료구조
+	// Process Thread
+	HANDLE m_ProcessThreadHnd;
 	std::set<UINT64> m_SectorMap[dfSECTOR_Y_MAX+1][dfSECTOR_X_MAX+1];
 
 private:
