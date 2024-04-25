@@ -168,7 +168,7 @@ struct MSG_PACKET_CS_CHAT_REQ_MESSAGE {
 
 	//WCHAR	Message[MessageLen / 2];		// null 미포함
 	//WCHAR* Message;
-};
+};	
 struct MSG_PACKET_CS_CHAT_RES_MESSAGE {
 	WORD	Type;
 	INT64	AccountNo;
@@ -178,7 +178,7 @@ struct MSG_PACKET_CS_CHAT_RES_MESSAGE {
 	WORD	MessageLen;
 
 	//WCHAR	Message[MessageLen / 2];		// null 미포함
-	WCHAR* Message;
+	//WCHAR* Message;
 };
 struct MSG_PACKET_CS_CHAT_REQ_HEARTBEAT {
 	WORD		Type;
