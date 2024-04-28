@@ -1,5 +1,6 @@
 #include "ChattingServer.h"
 #include <conio.h>
+#include <time.h>
 
 int main() {
 	//ChattingServer(const char* serverIP, UINT16 serverPort,
@@ -12,12 +13,22 @@ int main() {
 	chatserver.Start();
 
 	char ctr;
+	clock_t ct = 0;
 	while (true) {
-		if (_kbhit()) {
+		if (_kbhit()) {		
 			ctr = _getch();
 			if (ctr == 's' || ctr == 'S') {
 				break;
 			}
+		}
+
+		clock_t now = clock();
+		if (clock() - ct > 10000) {
+			chatserver.ConsoleLog();
+			ct = 0;
+		}
+		else {
+			ct += now;
 		}
 	}
 
