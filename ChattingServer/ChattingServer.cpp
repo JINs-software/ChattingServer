@@ -1,96 +1,5 @@
 #include "ChattingServer.h"
 
-UINT __stdcall ChattingServer::ProcessThreadFunc(void* arg)
-{
-	ChattingServer* server = (ChattingServer*)arg;
-#if defined(ALLOC_BY_TLS_MEM_POOL)
-	server->m_SerialBuffPoolIdx = server->m_SerialBuffPoolMgr.AllocTlsMemPool();	// 생성자에서 설정한 Default 값을 따름
-#endif
-
-	while (true) {
-		DWORD ret = WaitForMultipleObjects(server->m_WorkerThreadCnt, server->m_WorkerThreadRecvEvents, FALSE, INFINITE);
-		if (WAIT_OBJECT_0 <= ret && ret < WAIT_OBJECT_0 + server->m_WorkerThreadCnt) {
-			HANDLE recvEvent = server->m_WorkerThreadRecvEvents[ret];
-			std::queue<stRecvInfo>& recvQ = server->m_ThreadEventRecvqMap[recvEvent];
-			CRITICAL_SECTION* lockPtr = server->m_ThreadEventLockMap[recvEvent];		// 임시 동기화 객체
-			//if (recvQ.size() > 1) {
-			//	DebugBreak();
-			//}
-
-			size_t recvQueueSize = recvQ.size();	// -> 이 크기에 포함되지 않은 수신 정보는 다음 이벤트에서 확인됨이 보장.
-													// OnRecv 쪽에서 (1) 수신 정보 인큐, (2) SetEvent 순 이기에...
-			for (size_t i = 0; i < recvQueueSize; i++) {
-				EnterCriticalSection(lockPtr);							// 임시 동기화 객체
-				stRecvInfo& recvInfo = recvQ.front();
-				UINT64 sessionID = recvInfo.sessionID;
-				size_t recvSize = recvInfo.recvMsgCnt;			
-				recvQ.pop();
-				LeaveCriticalSection(lockPtr);							// 임시 동기화 객체	
-
-				server->ProcessMessage(sessionID, recvSize);
-			}
-		}
-		else {
-			// WaitForMultipleObjects Error..
-			DebugBreak();
-		}
-
-	}
-}
-
-void ChattingServer::ProcessMessage(UINT64 sessionID, size_t msgCnt)
-{
-	// .. 세션 별 메시지 큐 삽입
-	AcquireSRWLockShared(&m_SessionMessageqMapSrwLock);									
-	std::queue<JBuffer*>& sessionMsgQ = m_SessionMessageQueueMap[sessionID];
-	CRITICAL_SECTION* lockPtr = m_SessionMessageQueueLockMap[sessionID];	// 임시 동기화 객체
-	ReleaseSRWLockShared(&m_SessionMessageqMapSrwLock);
-	if (sessionMsgQ.empty()) {
-		DebugBreak();
-	}
-	for (size_t i = 0; i < msgCnt; i++) {
-		EnterCriticalSection(lockPtr);						// 임시 동기화 객체
-		JBuffer* msg = sessionMsgQ.front();
-		sessionMsgQ.pop();
-		LeaveCriticalSection(lockPtr);						// 임시 동기화 객체
-
-		WORD type;
-		msg->Peek(&type);
-		switch (type)
-		{
-		case en_PACKET_CS_CHAT_REQ_LOGIN:
-		{
-			MSG_PACKET_CS_CHAT_REQ_LOGIN loginReqMsg;
-			(*msg) >> loginReqMsg;	// 복사 없이 내부 버퍼를 그대로 캐스팅하는 방법은??
-			Proc_REQ_LOGIN(sessionID, loginReqMsg);
-		}
-			break;
-		case en_PACKET_CS_CHAT_REQ_SECTOR_MOVE:
-		{
-			MSG_PACKET_CS_CHAT_REQ_SECTOR_MOVE moveReqMsg;
-			(*msg) >> moveReqMsg;	// 복사 없이 내부 버퍼를 그대로 캐스팅하는 방법은??
-			Proc_REQ_SECTOR_MOVE(sessionID, moveReqMsg);
-		}
-			break;
-		case en_PACKET_CS_CHAT_REQ_MESSAGE:
-		{
-			MSG_PACKET_CS_CHAT_REQ_MESSAGE chatReqMsg;
-			(*msg) >> chatReqMsg;	// 복사 없이 내부 버퍼를 그대로 캐스팅하는 방법은??
-			BYTE* message = new BYTE[chatReqMsg.MessageLen];
-			memcpy(message, msg->GetDequeueBufferPtr(), chatReqMsg.MessageLen);
-			Proc_REQ_MESSAGE(sessionID, chatReqMsg, message);
-			delete[] message;
-		}
-			break;
-		case en_PACKET_CS_CHAT_REQ_HEARTBEAT:
-			break;
-		default:
-			DebugBreak();
-			break;
-		}
-	}
-}
-
 bool ChattingServer::OnWorkerThreadCreate(HANDLE thHnd)
 {
 	if (m_WorkerThreadCnt >= MAX_WORKER_THREAD_CNT) {
@@ -103,6 +12,7 @@ bool ChattingServer::OnWorkerThreadCreate(HANDLE thHnd)
 	DWORD thID = GetThreadId(thHnd);
 	thEventIndexMap.insert({ thID, recvEvent });
 
+	return true;
 }
 
 void ChattingServer::OnWorkerThreadCreateDone()
@@ -134,7 +44,7 @@ bool ChattingServer::OnConnectionRequest()
 
 void ChattingServer::OnClientJoin(uint64 sessionID)
 {
-	std::cout << "[OnClientJoin] sessionID: " << sessionID << std::endl;
+	//std::cout << "[OnClientJoin] sessionID: " << sessionID << std::endl;
 	{
 		std::lock_guard<std::mutex> lockGuard(m_LoginWaitSessionsMtx);
 		m_LoginWaitSessions.insert(sessionID);
@@ -205,11 +115,11 @@ void ChattingServer::OnRecv(uint64 sessionID, JBuffer& recvBuff)
 			recvBuff.Peek(&type);
 
 			JBuffer* message = (JBuffer*)m_SerialBuffPoolMgr.GetTlsMemPool().AllocMem();
+			message->ClearBuffer();
 			switch (type)
 			{
 			case en_PACKET_CS_CHAT_REQ_LOGIN:
 			{
-				message = new JBuffer(sizeof(MSG_PACKET_CS_CHAT_REQ_LOGIN));
 				recvBuff.Dequeue(message->GetDequeueBufferPtr(), sizeof(MSG_PACKET_CS_CHAT_REQ_LOGIN));
 				message->DirectMoveEnqueueOffset(sizeof(MSG_PACKET_CS_CHAT_REQ_LOGIN));
 				dequeueSize += sizeof(MSG_PACKET_CS_CHAT_REQ_LOGIN);
@@ -217,7 +127,6 @@ void ChattingServer::OnRecv(uint64 sessionID, JBuffer& recvBuff)
 				break;
 			case en_PACKET_CS_CHAT_REQ_SECTOR_MOVE:
 			{
-				message = new JBuffer(sizeof(MSG_PACKET_CS_CHAT_REQ_SECTOR_MOVE));
 				recvBuff.Dequeue(message->GetDequeueBufferPtr(), sizeof(MSG_PACKET_CS_CHAT_REQ_SECTOR_MOVE));
 				message->DirectMoveEnqueueOffset(sizeof(MSG_PACKET_CS_CHAT_REQ_SECTOR_MOVE));
 				dequeueSize += sizeof(MSG_PACKET_CS_CHAT_REQ_SECTOR_MOVE);
@@ -227,8 +136,6 @@ void ChattingServer::OnRecv(uint64 sessionID, JBuffer& recvBuff)
 			{
 				WORD messageLen;
 				recvBuff.Peek(sizeof(WORD) + sizeof(INT64), (BYTE*)&messageLen, sizeof(WORD));
-
-				message = new JBuffer(sizeof(MSG_PACKET_CS_CHAT_REQ_MESSAGE) + messageLen);
 				recvBuff.Dequeue(message->GetDequeueBufferPtr(), sizeof(MSG_PACKET_CS_CHAT_REQ_MESSAGE) + messageLen);
 				message->DirectMoveEnqueueOffset(sizeof(MSG_PACKET_CS_CHAT_REQ_MESSAGE) + messageLen);
 				dequeueSize += sizeof(MSG_PACKET_CS_CHAT_REQ_MESSAGE) + messageLen;
@@ -247,12 +154,12 @@ void ChattingServer::OnRecv(uint64 sessionID, JBuffer& recvBuff)
 			if (message != NULL) {
 				// .. 세션 별 메시지 큐 삽입
 				AcquireSRWLockShared(&m_SessionMessageqMapSrwLock);
-				std::queue<JBuffer*>& sessinMsgQ = m_SessionMessageQueueMap[sessionID];
+				std::queue<JBuffer*>& sessionMsgQ = m_SessionMessageQueueMap[sessionID];
 				CRITICAL_SECTION* lockPtr = m_SessionMessageQueueLockMap[sessionID];		// 임시 동기화 객체
 				ReleaseSRWLockShared(&m_SessionMessageqMapSrwLock);							
 
 				EnterCriticalSection(lockPtr);								// 임시 동기화 객체
-				sessinMsgQ.push(message);
+				sessionMsgQ.push(message);
 				LeaveCriticalSection(lockPtr);								// 임시 동기화 객체
 				recvInfo.recvMsgCnt++;
 			}
@@ -329,6 +236,108 @@ void ChattingServer::OnError()
 {
 }
 
+UINT __stdcall ChattingServer::ProcessThreadFunc(void* arg)
+{
+	ChattingServer* server = (ChattingServer*)arg;
+#if defined(ALLOC_BY_TLS_MEM_POOL)
+	server->m_SerialBuffPoolIdx = server->m_SerialBuffPoolMgr.AllocTlsMemPool();	// 생성자에서 설정한 Default 값을 따름
+#endif
+
+	while (true) {
+		DWORD ret = WaitForMultipleObjects(server->m_WorkerThreadCnt, server->m_WorkerThreadRecvEvents, FALSE, INFINITE);
+		if (WAIT_OBJECT_0 <= ret && ret < WAIT_OBJECT_0 + server->m_WorkerThreadCnt) {
+			HANDLE recvEvent = server->m_WorkerThreadRecvEvents[ret];
+			std::queue<stRecvInfo>& recvQ = server->m_ThreadEventRecvqMap[recvEvent];
+			CRITICAL_SECTION* lockPtr = server->m_ThreadEventLockMap[recvEvent];		// 임시 동기화 객체
+			//if (recvQ.size() > 1) {
+			//	DebugBreak();
+			//}
+
+			size_t recvQueueSize = recvQ.size();	// -> 이 크기에 포함되지 않은 수신 정보는 다음 이벤트에서 확인됨이 보장.
+			// OnRecv 쪽에서 (1) 수신 정보 인큐, (2) SetEvent 순 이기에...
+			for (size_t i = 0; i < recvQueueSize; i++) {
+				EnterCriticalSection(lockPtr);							// 임시 동기화 객체
+				stRecvInfo& recvInfo = recvQ.front();
+				UINT64 sessionID = recvInfo.sessionID;
+				size_t recvSize = recvInfo.recvMsgCnt;
+				recvQ.pop();
+				LeaveCriticalSection(lockPtr);							// 임시 동기화 객체	
+
+				server->ProcessMessage(sessionID, recvSize);
+			}
+		}
+		else {
+			// WaitForMultipleObjects Error..
+			DebugBreak();
+		}
+
+	}
+}
+
+void ChattingServer::ProcessMessage(UINT64 sessionID, size_t msgCnt)
+{
+	// .. 세션 별 메시지 큐 삽입
+	AcquireSRWLockShared(&m_SessionMessageqMapSrwLock);
+	std::queue<JBuffer*>& sessionMsgQ = m_SessionMessageQueueMap[sessionID];
+	CRITICAL_SECTION* lockPtr = m_SessionMessageQueueLockMap[sessionID];	// 임시 동기화 객체
+	ReleaseSRWLockShared(&m_SessionMessageqMapSrwLock);
+	if (sessionMsgQ.empty()) {
+		DebugBreak();
+	}
+	for (size_t i = 0; i < msgCnt; i++) {
+		EnterCriticalSection(lockPtr);						// 임시 동기화 객체
+		JBuffer* msg = sessionMsgQ.front();
+		sessionMsgQ.pop();
+		LeaveCriticalSection(lockPtr);						// 임시 동기화 객체
+
+		WORD type;
+		msg->Peek(&type);
+		switch (type)
+		{
+		case en_PACKET_CS_CHAT_REQ_LOGIN:
+		{
+			if (msg->GetUseSize() < sizeof(MSG_PACKET_CS_CHAT_REQ_LOGIN)) {
+				DebugBreak();
+			}
+			MSG_PACKET_CS_CHAT_REQ_LOGIN loginReqMsg;
+			(*msg) >> loginReqMsg;	// 복사 없이 내부 버퍼를 그대로 캐스팅하는 방법은??
+			Proc_REQ_LOGIN(sessionID, loginReqMsg);
+		}
+		break;
+		case en_PACKET_CS_CHAT_REQ_SECTOR_MOVE:
+		{
+			if (msg->GetUseSize() < sizeof(MSG_PACKET_CS_CHAT_REQ_SECTOR_MOVE)) {
+				DebugBreak();
+			}
+			MSG_PACKET_CS_CHAT_REQ_SECTOR_MOVE moveReqMsg;
+			(*msg) >> moveReqMsg;	// 복사 없이 내부 버퍼를 그대로 캐스팅하는 방법은??
+			Proc_REQ_SECTOR_MOVE(sessionID, moveReqMsg);
+		}
+		break;
+		case en_PACKET_CS_CHAT_REQ_MESSAGE:
+		{
+			if (msg->GetUseSize() < sizeof(MSG_PACKET_CS_CHAT_REQ_MESSAGE)) {
+				DebugBreak();
+			}
+			MSG_PACKET_CS_CHAT_REQ_MESSAGE chatReqMsg;
+			(*msg) >> chatReqMsg;	// 복사 없이 내부 버퍼를 그대로 캐스팅하는 방법은??
+			BYTE* message = new BYTE[chatReqMsg.MessageLen];
+			memcpy(message, msg->GetDequeueBufferPtr(), chatReqMsg.MessageLen);
+			Proc_REQ_MESSAGE(sessionID, chatReqMsg, message);
+			delete[] message;
+		}
+		break;
+		case en_PACKET_CS_CHAT_REQ_HEARTBEAT:
+			break;
+		default:
+			DebugBreak();
+			break;
+		}
+
+		m_SerialBuffPoolMgr.GetTlsMemPool().FreeMem(msg);
+	}
+}
+
 //# 원본 데이터 바이트 단위  D1 D2 D3 D4
 //----------------------------------------------------------------------------------------------------------
 //| D1 | D2 | D3 | D4 |
@@ -398,10 +407,10 @@ void ChattingServer::Encode(BYTE randKey, USHORT payloadLen, BYTE& checkSum, BYT
 
 void ChattingServer::Proc_REQ_LOGIN(UINT64 sessionID, MSG_PACKET_CS_CHAT_REQ_LOGIN& body)
 {
-	std::cout << "[Proc_REQ_LOGIN] sessionID: " << sessionID << ", accountNo: " << body.AccountNo << std::endl;
+	//std::cout << "[Proc_REQ_LOGIN] sessionID: " << sessionID << ", accountNo: " << body.AccountNo << std::endl;
 	// 세션 연결 수립 -> LoginWait 셋 등록 전 해당 메시지 처리가 후에 처리됨이 보장되지 않을 수 있음
 	// 로그인 대기 셋에 해당 세션이 존재하면 삭제하는 정도만 진행
-	std::cout << "[LOGIN] accountNo: " << body.AccountNo << std::endl;
+	//std::cout << "[LOGIN] accountNo: " << body.AccountNo << std::endl;
 	{
 		std::lock_guard<std::mutex> lockGuard(m_LoginWaitSessionsMtx);
 		if (m_LoginWaitSessions.find(sessionID) != m_LoginWaitSessions.end()) {
@@ -429,7 +438,7 @@ void ChattingServer::Proc_REQ_LOGIN(UINT64 sessionID, MSG_PACKET_CS_CHAT_REQ_LOG
 
 void ChattingServer::Send_RES_LOGIN(UINT64 sessionID, BYTE STATUS, INT64 AccountNo)
 {	
-	std::cout << "[Send_RES_LOGIN] sessionID: " << sessionID << ", accountNo: " << AccountNo << std::endl;
+	//std::cout << "[Send_RES_LOGIN] sessionID: " << sessionID << ", accountNo: " << AccountNo << std::endl;
 	// Unicast Reply
 	JBuffer* sendMessage = m_SerialBuffPoolMgr.GetTlsMemPool().AllocMem();
 	sendMessage->ClearBuffer();
@@ -451,10 +460,10 @@ void ChattingServer::Send_RES_LOGIN(UINT64 sessionID, BYTE STATUS, INT64 Account
 
 void ChattingServer::Proc_REQ_SECTOR_MOVE(UINT64 sessionID, MSG_PACKET_CS_CHAT_REQ_SECTOR_MOVE& body)
 {
-	std::cout << "[Proc_REQ_SECTOR_MOVE] sessionID: " << sessionID << ", accountNo: " << body.AccountNo << ", X: " << body.SectorX << ", Y: " << body.SectorY << std::endl;
+	//std::cout << "[Proc_REQ_SECTOR_MOVE] sessionID: " << sessionID << ", accountNo: " << body.AccountNo << ", X: " << body.SectorX << ", Y: " << body.SectorY << std::endl;
 
 	stAccoutInfo& accountInfo = m_SessionIdAccountMap[sessionID];
-	std::cout << "기존 X: " << accountInfo.X << ", Y: " << accountInfo.Y << std::endl;
+	//std::cout << "기존 X: " << accountInfo.X << ", Y: " << accountInfo.Y << std::endl;
 	if (accountInfo.X >= 0 && accountInfo.X <= dfSECTOR_X_MAX && accountInfo.Y >= 0 && accountInfo.X <= dfSECTOR_Y_MAX) {
 		std::set<UINT64>& sector = m_SectorMap[accountInfo.Y][accountInfo.X];
 		sector.erase(sessionID);
@@ -470,14 +479,14 @@ void ChattingServer::Proc_REQ_SECTOR_MOVE(UINT64 sessionID, MSG_PACKET_CS_CHAT_R
 		m_SectorMap[accountInfo.Y][accountInfo.X].insert(sessionID);
 	}
 
-	std::cout << "신규 X: " << accountInfo.X << ", 신규 Y: " << accountInfo.Y << std::endl;
+	//std::cout << "신규 X: " << accountInfo.X << ", 신규 Y: " << accountInfo.Y << std::endl;
 
 	Send_RES_SECTOR_MOVE(sessionID, accountInfo.AccountNo, accountInfo.X, accountInfo.Y);
 }
 
 void ChattingServer::Send_RES_SECTOR_MOVE(UINT64 sessionID, INT64 AccountNo, WORD SectorX, WORD SectorY)
 {
-	std::cout << "[Send_RES_SECTOR_MOVE] sessionID: " << sessionID << ", accountNo: " << AccountNo << std::endl;
+	//std::cout << "[Send_RES_SECTOR_MOVE] sessionID: " << sessionID << ", accountNo: " << AccountNo << std::endl;
 	// Unicast Reply
 	JBuffer* sendMessage = m_SerialBuffPoolMgr.GetTlsMemPool().AllocMem();
 	sendMessage->ClearBuffer();
@@ -499,12 +508,13 @@ void ChattingServer::Send_RES_SECTOR_MOVE(UINT64 sessionID, INT64 AccountNo, WOR
 
 void ChattingServer::Proc_REQ_MESSAGE(UINT64 sessionID, MSG_PACKET_CS_CHAT_REQ_MESSAGE& body, BYTE* message)
 {
-	std::cout << "[Proc_REQ_MESSAGE] sessionID: " << sessionID << ", accountNo: " << body.AccountNo << std::endl;
+	//std::cout << "[Proc_REQ_MESSAGE] sessionID: " << sessionID << ", accountNo: " << body.AccountNo << std::endl;
 
 	TlsMemPool<JBuffer>& tlsMemPool = m_SerialBuffPoolMgr.GetTlsMemPool();
 	JBuffer* sendMessage = tlsMemPool.AllocMem();
 	sendMessage->ClearBuffer();
-	tlsMemPool.IncrementRefCnt(sendMessage);		// 공유 전송 메시지
+
+	//tlsMemPool.IncrementRefCnt(sendMessage);		// 공유 전송 메시지
 
 	stMSG_HDR* hdr = sendMessage->DirectReserve<stMSG_HDR>();
 	hdr->code = dfPACKET_CODE;
@@ -533,7 +543,7 @@ void ChattingServer::Proc_REQ_MESSAGE(UINT64 sessionID, MSG_PACKET_CS_CHAT_REQ_M
 			std::set<UINT64>& sector = m_SectorMap[y][x];
 			for (auto iter = sector.begin(); iter != sector.end(); iter++) {
 				tlsMemPool.IncrementRefCnt(sendMessage);
-				std::cout << "[Proc_REQ_MESSAGE | SendPacekt] sessionID: " << *iter << std::endl;
+				//std::cout << "[Proc_REQ_MESSAGE | SendPacekt] sessionID: " << *iter << std::endl;
 				SendPacket(*iter, sendMessage);
 			}
 		}
@@ -541,7 +551,7 @@ void ChattingServer::Proc_REQ_MESSAGE(UINT64 sessionID, MSG_PACKET_CS_CHAT_REQ_M
 
 	tlsMemPool.FreeMem(sendMessage);
 
-	std::cout << "[Proc_REQ_MESSAGE | DONE ] sessionID: " << sessionID << ", accountNo: " << body.AccountNo << std::endl;
+	//std::cout << "[Proc_REQ_MESSAGE | DONE ] sessionID: " << sessionID << ", accountNo: " << body.AccountNo << std::endl;
 }
 
 void ChattingServer::Proc_REQ_HEARTBEAT()

@@ -12,12 +12,16 @@
 class ChattingServer : public CLanServer
 {
 public:
-	ChattingServer(const char* serverIP, UINT16 serverPort,
-		DWORD numOfIocpConcurrentThrd, UINT16 numOfWorkerThreads,
-		UINT16 maxOfConnections, bool beNagle = true,
-		UINT32 sessionSendBuffSize = CHAT_SERV_SESSION_SEND_BUFF_SIZE, UINT32 sessionRecvBuffSize = CHAT_SERV_SESSION_RECV_BUFF_SIZE
+	ChattingServer(const char* serverIP, uint16 serverPort,
+		DWORD numOfIocpConcurrentThrd, uint16 numOfWorkerThreads, uint16 maxOfConnections,
+		size_t tlsMemPoolDefaultUnitCnt = CHAT_TLS_MEM_POOL_DEFAULT_UNIT_CNT, size_t tlsMemPoolDefaultCapacity = CHAT_TLS_MEM_POOL_DEFAULT_UNIT_CAPACITY,
+		uint32 sessionSendBuffSize = CHAT_SERV_SESSION_SEND_BUFF_SIZE, uint32 sessionRecvBuffSize = CHAT_SERV_SESSION_RECV_BUFF_SIZE,
+		bool beNagle = true
 	) 
-		: CLanServer(serverIP, serverPort, numOfIocpConcurrentThrd, numOfWorkerThreads, maxOfConnections, true), 
+		: CLanServer(serverIP, serverPort, numOfIocpConcurrentThrd, numOfWorkerThreads, maxOfConnections, true, false,
+			tlsMemPoolDefaultUnitCnt, tlsMemPoolDefaultCapacity,
+			sessionSendBuffSize, sessionRecvBuffSize
+			), 
 		m_WorkerThreadCnt(0),
 		m_LimitAcceptance(maxOfConnections)
 	{
