@@ -62,6 +62,7 @@ void ChattingServer::OnClientJoin(uint64 sessionID)
 
 void ChattingServer::OnClientLeave(uint64 sessionID)
 {
+	cout << "[OnClientLeave] sessionID: " << sessionID << endl;
 }
 
 void ChattingServer::OnRecv(uint64 sessionID, JBuffer& recvBuff)
