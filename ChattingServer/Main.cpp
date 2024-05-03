@@ -20,6 +20,9 @@ int main() {
 			if (ctr == 's' || ctr == 'S') {
 				break;
 			}
+			else if (ctr == 'c' || ctr == 'C') {
+				chatserver.MemAllocLog();
+			}
 		}
 
 		clock_t now = clock();
