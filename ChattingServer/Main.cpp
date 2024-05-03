@@ -22,6 +22,7 @@ int main() {
 			}
 			else if (ctr == 'c' || ctr == 'C') {
 				chatserver.MemAllocLog();
+				DebugBreak();
 			}
 		}
 

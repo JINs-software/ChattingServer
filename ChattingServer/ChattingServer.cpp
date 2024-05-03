@@ -62,7 +62,9 @@ void ChattingServer::OnClientJoin(uint64 sessionID)
 
 void ChattingServer::OnClientLeave(uint64 sessionID)
 {
-	cout << "[OnClientLeave] sessionID: " << sessionID << endl;
+	//cout << "[OnClientLeave] sessionID: " << sessionID << endl;
+	stAccoutInfo& accountInfo = m_SessionIdAccountMap[sessionID];
+
 }
 
 void ChattingServer::OnRecv(uint64 sessionID, JBuffer& recvBuff)
@@ -115,7 +117,7 @@ void ChattingServer::OnRecv(uint64 sessionID, JBuffer& recvBuff)
 			WORD type;
 			recvBuff.Peek(&type);
 
-			JBuffer* message = (JBuffer*)m_SerialBuffPoolMgr.GetTlsMemPool().AllocMem();
+			JBuffer* message = (JBuffer*)m_SerialBuffPoolMgr.GetTlsMemPool().AllocMem(1, to_string(sessionID) + ", OnRecv");
 			message->ClearBuffer();
 			switch (type)
 			{
@@ -335,7 +337,7 @@ void ChattingServer::ProcessMessage(UINT64 sessionID, size_t msgCnt)
 			break;
 		}
 
-		m_SerialBuffPoolMgr.GetTlsMemPool().FreeMem(msg);
+		m_SerialBuffPoolMgr.GetTlsMemPool().FreeMem(msg, to_string(sessionID) + ", FreeMem (ChattingServer::ProcessMessage)");
 	}
 }
 
@@ -441,7 +443,7 @@ void ChattingServer::Send_RES_LOGIN(UINT64 sessionID, BYTE STATUS, INT64 Account
 {	
 	//std::cout << "[Send_RES_LOGIN] sessionID: " << sessionID << ", accountNo: " << AccountNo << std::endl;
 	// Unicast Reply
-	JBuffer* sendMessage = m_SerialBuffPoolMgr.GetTlsMemPool().AllocMem();
+	JBuffer* sendMessage = m_SerialBuffPoolMgr.GetTlsMemPool().AllocMem(1, to_string(sessionID) + ", Send_RES_LOGIN");
 	sendMessage->ClearBuffer();
 	//m_SerialBuffPoolMgr.GetTlsMemPool().IncrementRefCnt(sendMessage);
 
@@ -489,7 +491,7 @@ void ChattingServer::Send_RES_SECTOR_MOVE(UINT64 sessionID, INT64 AccountNo, WOR
 {
 	//std::cout << "[Send_RES_SECTOR_MOVE] sessionID: " << sessionID << ", accountNo: " << AccountNo << std::endl;
 	// Unicast Reply
-	JBuffer* sendMessage = m_SerialBuffPoolMgr.GetTlsMemPool().AllocMem();
+	JBuffer* sendMessage = m_SerialBuffPoolMgr.GetTlsMemPool().AllocMem(1, to_string(sessionID) + ", Send_RES_SECTOR_MOVE");
 	sendMessage->ClearBuffer();
 	//m_SerialBuffPoolMgr.GetTlsMemPool().IncrementRefCnt(sendPacket);
 
@@ -512,7 +514,7 @@ void ChattingServer::Proc_REQ_MESSAGE(UINT64 sessionID, MSG_PACKET_CS_CHAT_REQ_M
 	//std::cout << "[Proc_REQ_MESSAGE] sessionID: " << sessionID << ", accountNo: " << body.AccountNo << std::endl;
 
 	TlsMemPool<JBuffer>& tlsMemPool = m_SerialBuffPoolMgr.GetTlsMemPool();
-	JBuffer* sendMessage = tlsMemPool.AllocMem();
+	JBuffer* sendMessage = tlsMemPool.AllocMem(1, to_string(sessionID) + ", Proc_REQ_MESSAGE");
 	sendMessage->ClearBuffer();
 
 	//tlsMemPool.IncrementRefCnt(sendMessage);		// 공유 전송 메시지
@@ -543,14 +545,14 @@ void ChattingServer::Proc_REQ_MESSAGE(UINT64 sessionID, MSG_PACKET_CS_CHAT_REQ_M
 
 			std::set<UINT64>& sector = m_SectorMap[y][x];
 			for (auto iter = sector.begin(); iter != sector.end(); iter++) {
-				tlsMemPool.IncrementRefCnt(sendMessage);
+				tlsMemPool.IncrementRefCnt(sendMessage, 1, to_string(sessionID) + ", Forwaring Msg to " + to_string(*iter));
 				//std::cout << "[Proc_REQ_MESSAGE | SendPacekt] sessionID: " << *iter << std::endl;
 				SendPacket(*iter, sendMessage);
 			}
 		}
 	}
 
-	tlsMemPool.FreeMem(sendMessage);
+	tlsMemPool.FreeMem(sendMessage, to_string(sessionID) + ", FreeMem (ChattingServer::Proc_REQ_MESSAGE)");
 
 	//std::cout << "[Proc_REQ_MESSAGE | DONE ] sessionID: " << sessionID << ", accountNo: " << body.AccountNo << std::endl;
 }
