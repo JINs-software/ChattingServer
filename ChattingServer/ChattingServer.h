@@ -27,6 +27,13 @@ public:
 	{
 		m_RecvEventTlsIndex = TlsAlloc();
 		InitializeSRWLock(&m_SessionMessageqMapSrwLock);
+
+		// SRWLOCK m_SectorSrwLock[dfSECTOR_Y_MAX + 1][dfSECTOR_X_MAX + 1];
+		for (WORD i = 0; i < dfSECTOR_Y_MAX + 1; i++) {
+			for (WORD j = 0; j < dfSECTOR_X_MAX + 1; j++) {
+				InitializeSRWLock(&m_SectorSrwLock[i][j]);
+			}
+		}
 	}
 
 private:
@@ -71,6 +78,7 @@ private:
 	// Process Thread
 	HANDLE m_ProcessThreadHnd;
 	std::set<UINT64> m_SectorMap[dfSECTOR_Y_MAX+1][dfSECTOR_X_MAX+1];
+	SRWLOCK m_SectorSrwLock[dfSECTOR_Y_MAX + 1][dfSECTOR_X_MAX + 1];
 
 private:
 	// Process Thread Working Function

@@ -62,8 +62,33 @@ void ChattingServer::OnClientJoin(uint64 sessionID)
 
 void ChattingServer::OnClientLeave(uint64 sessionID)
 {
-	//cout << "[OnClientLeave] sessionID: " << sessionID << endl;
-	stAccoutInfo& accountInfo = m_SessionIdAccountMap[sessionID];
+	bool loginWaitSession = false;
+	// 로그인 완료 이전의 세션
+	{
+		std::lock_guard<std::mutex> lockGuard(m_LoginWaitSessionsMtx);
+		if (m_LoginWaitSessions.find(sessionID) != m_LoginWaitSessions.end()) {
+			m_LoginWaitSessions.erase(sessionID);
+			loginWaitSession = true;
+		}
+	}
+
+	if (!loginWaitSession) {
+		// 로그인 완료 후 Account이 존재하는 세션
+		stAccoutInfo& accountInfo = m_SessionIdAccountMap[sessionID];
+		if (accountInfo.X >= 0 && accountInfo.X <= dfSECTOR_X_MAX && accountInfo.Y >= 0 && accountInfo.X <= dfSECTOR_Y_MAX) {
+			AcquireSRWLockExclusive(&m_SectorSrwLock[accountInfo.Y][accountInfo.X]);
+			std::set<UINT64>& sector = m_SectorMap[accountInfo.Y][accountInfo.X];
+			if (sector.find(sessionID) != sector.end()) {
+				sector.erase(sessionID);
+			}
+			else {
+				DebugBreak();
+			}
+			ReleaseSRWLockExclusive(&m_SectorSrwLock[accountInfo.Y][accountInfo.X]);
+		}
+
+		m_SessionIdAccountMap.erase(sessionID);
+	}
 
 }
 
@@ -456,7 +481,9 @@ void ChattingServer::Send_RES_LOGIN(UINT64 sessionID, BYTE STATUS, INT64 Account
 
 	Encode(hdr->randKey, hdr->len, hdr->checkSum, sendMessage->GetBufferPtr(sizeof(stMSG_HDR)));
 
-	SendPacket(sessionID, sendMessage);
+	if (!SendPacket(sessionID, sendMessage)) {
+		m_SerialBuffPoolMgr.GetTlsMemPool().FreeMem(sendMessage, "FreeMem (SendPacket Fail, Send_RES_LOGIN)");
+	}
 
 	//m_SerialBuffPoolMgr.GetTlsMemPool().FreeMem(sendMessage);
 }
@@ -468,8 +495,10 @@ void ChattingServer::Proc_REQ_SECTOR_MOVE(UINT64 sessionID, MSG_PACKET_CS_CHAT_R
 	stAccoutInfo& accountInfo = m_SessionIdAccountMap[sessionID];
 	//std::cout << "기존 X: " << accountInfo.X << ", Y: " << accountInfo.Y << std::endl;
 	if (accountInfo.X >= 0 && accountInfo.X <= dfSECTOR_X_MAX && accountInfo.Y >= 0 && accountInfo.X <= dfSECTOR_Y_MAX) {
+		AcquireSRWLockExclusive(&m_SectorSrwLock[accountInfo.Y][accountInfo.X]);
 		std::set<UINT64>& sector = m_SectorMap[accountInfo.Y][accountInfo.X];
 		sector.erase(sessionID);
+		ReleaseSRWLockExclusive(&m_SectorSrwLock[accountInfo.Y][accountInfo.X]);
 	}
 
 	if (body.SectorX < 0 || body.SectorX > dfSECTOR_X_MAX || body.SectorY < 0 || body.SectorY > dfSECTOR_Y_MAX) {
@@ -504,7 +533,10 @@ void ChattingServer::Send_RES_SECTOR_MOVE(UINT64 sessionID, INT64 AccountNo, WOR
 
 	Encode(hdr->randKey, hdr->len, hdr->checkSum, sendMessage->GetBufferPtr(sizeof(stMSG_HDR)));
 
-	SendPacket(sessionID, sendMessage);
+	//SendPacket(sessionID, sendMessage);
+	if (!SendPacket(sessionID, sendMessage)) {
+		m_SerialBuffPoolMgr.GetTlsMemPool().FreeMem(sendMessage, "FreeMem (SendPacket Fail, Send_RES_SECTOR_MOVE)");
+	}
 
 	//m_SerialBuffPoolMgr.GetTlsMemPool().FreeMem(sendMessage);
 }
@@ -543,12 +575,16 @@ void ChattingServer::Proc_REQ_MESSAGE(UINT64 sessionID, MSG_PACKET_CS_CHAT_REQ_M
 				continue;
 			}
 
+			AcquireSRWLockShared(&m_SectorSrwLock[y][x]);
 			std::set<UINT64>& sector = m_SectorMap[y][x];
 			for (auto iter = sector.begin(); iter != sector.end(); iter++) {
-				tlsMemPool.IncrementRefCnt(sendMessage, 1, to_string(sessionID) + ", Forwaring Msg to " + to_string(*iter));
+				tlsMemPool.IncrementRefCnt(sendMessage, 1, to_string(sessionID) + ", Forwaring Chat Msg to " + to_string(*iter));
 				//std::cout << "[Proc_REQ_MESSAGE | SendPacekt] sessionID: " << *iter << std::endl;
-				SendPacket(*iter, sendMessage);
+				if (!SendPacket(*iter, sendMessage)) {
+					m_SerialBuffPoolMgr.GetTlsMemPool().FreeMem(sendMessage, "FreeMem (SendPacket Fail, Forwaring Chat Mst)");
+				}
 			}
+			ReleaseSRWLockShared(&m_SectorSrwLock[y][x]);
 		}
 	}
 
