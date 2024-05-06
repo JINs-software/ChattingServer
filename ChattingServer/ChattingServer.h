@@ -70,10 +70,11 @@ private:
 	std::mutex			m_LoginWaitSessionsMtx;
 
 	std::unordered_map<UINT64, std::queue<JBuffer*>>		m_SessionMessageQueueMap;
-	// 임시 동기화 객체 (락-프리 적용 전)
-	std::unordered_map<UINT64, CRITICAL_SECTION*>			m_SessionMessageQueueLockMap;
-	std::unordered_map<UINT64, stAccoutInfo>				m_SessionIdAccountMap;
 	SRWLOCK	m_SessionMessageqMapSrwLock;
+	// 임시 동기화 객체 (락-프리 적용 전)
+	std::unordered_map<UINT64, CRITICAL_SECTION*>			m_SessionMessageQueueLockMap; // 메시지 큐 별 동기화 객체
+
+	std::unordered_map<UINT64, stAccoutInfo>				m_SessionIdAccountMap;
 
 	// Process Thread
 	HANDLE m_ProcessThreadHnd;

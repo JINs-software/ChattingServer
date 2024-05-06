@@ -24,6 +24,10 @@ int main() {
 				chatserver.MemAllocLog();
 				DebugBreak();
 			}
+			else if (ctr == 'd' || ctr == 'D') {
+				chatserver.SessionReleaseLog();
+				DebugBreak();
+			}
 		}
 
 		clock_t now = clock();

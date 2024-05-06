@@ -88,6 +88,15 @@ void ChattingServer::OnClientLeave(uint64 sessionID)
 		}
 
 		m_SessionIdAccountMap.erase(sessionID);
+
+		AcquireSRWLockExclusive(&m_SessionMessageqMapSrwLock);
+
+		m_SessionMessageQueueMap.erase(sessionID);
+		// 임시 동기화 객체
+		DeleteCriticalSection(m_SessionMessageQueueLockMap[sessionID]);
+		m_SessionMessageQueueLockMap.erase(sessionID);
+
+		ReleaseSRWLockExclusive(&m_SessionMessageqMapSrwLock);
 	}
 
 }
