@@ -27,12 +27,9 @@ int main() {
 		}
 
 		clock_t now = clock();
-		if (clock() - ct > 10000) {
+		if (now - ct > 100) {
 			chatserver.ConsoleLog();
-			ct = 0;
-		}
-		else {
-			ct += now;
+			ct = now;
 		}
 	}
 
