@@ -9,8 +9,22 @@
 #include <set>
 #include <unordered_map>
 
+#define PLAYER_CREATE_RELEASE_LOG
+
 class ChattingServer : public CLanServer
 {
+#if defined(PLAYER_CREATE_RELEASE_LOG)
+	struct stPlayerLog {
+		bool joinFlag = false;
+		bool leaveFlag = false;
+		uint64 sessionID = 0;
+		uint64 sessinIdIndex;
+		int64 accountNo;
+		en_PACKET_TYPE packetID;
+	};
+	USHORT m_PlayerLogIdx;
+	std::vector<stPlayerLog> m_PlayerLog;
+#endif
 public:
 	ChattingServer(const char* serverIP, uint16 serverPort,
 		DWORD numOfIocpConcurrentThrd, uint16 numOfWorkerThreads, uint16 maxOfConnections,
@@ -25,6 +39,10 @@ public:
 		m_WorkerThreadCnt(0),
 		m_LimitAcceptance(maxOfConnections)
 	{
+#if defined(PLAYER_CREATE_RELEASE_LOG)
+		m_PlayerLogIdx = -1;
+		m_PlayerLog.resize(USHRT_MAX + 1);
+#endif
 		m_RecvEventTlsIndex = TlsAlloc();
 		InitializeSRWLock(&m_SessionMessageqMapSrwLock);
 
@@ -34,7 +52,11 @@ public:
 				InitializeSRWLock(&m_SectorSrwLock[i][j]);
 			}
 		}
+
+		InitializeSRWLock(&m_SessionAccountMapSrwLock);
 	}
+
+	void PlayerFileLog();
 
 private:
 	virtual bool OnWorkerThreadCreate(HANDLE thHnd) override;
@@ -75,6 +97,7 @@ private:
 	std::unordered_map<UINT64, CRITICAL_SECTION*>			m_SessionMessageQueueLockMap; // 메시지 큐 별 동기화 객체
 
 	std::unordered_map<UINT64, stAccoutInfo>				m_SessionIdAccountMap;
+	SRWLOCK m_SessionAccountMapSrwLock;
 
 	// Process Thread
 	HANDLE m_ProcessThreadHnd;
@@ -95,6 +118,7 @@ private:
 	void Send_RES_SECTOR_MOVE(UINT64 sessionID, INT64 AccountNo, WORD SectorX, WORD SectorY);
 	void Proc_REQ_MESSAGE(UINT64 sessionID, MSG_PACKET_CS_CHAT_REQ_MESSAGE& body, BYTE* message);
 	void Proc_REQ_HEARTBEAT();
-
+	
+	void Proc_SessionRelease(UINT64 sessionID);
 };
 

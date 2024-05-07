@@ -122,8 +122,7 @@ enum en_PACKET_TYPE
 	//------------------------------------------------------------	
 	en_PACKET_CS_CHAT_REQ_HEARTBEAT,
 
-
-
+	en_SESSION_RELEASE
 };
 
 //#endif
