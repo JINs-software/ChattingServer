@@ -28,6 +28,11 @@ int main() {
 				chatserver.SessionReleaseLog();
 				DebugBreak();
 			}
+			else if (ctr == 'p' || ctr == 'P') {
+				chatserver.SessionReleaseLog();
+				chatserver.PlayerFileLog();
+				DebugBreak();
+			}
 		}
 
 		clock_t now = clock();
