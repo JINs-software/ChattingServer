@@ -23,6 +23,27 @@ void ChattingServer::PlayerFileLog()
 
 	outputFile << currentDateTime << std::endl;
 
+	for (USHORT i = 0; i <= m_DeletedSendPacketIdx; i++) {
+		if (m_DeletedSendPacketLog[i].accountNo == 0) {
+			break;
+		}
+
+		outputFile << "-------------------------------------------------" << std::endl;
+		if (m_DeletedSendPacketLog[i].type == en_PACKET_CS_CHAT_RES_LOGIN) {
+			outputFile << "[RES_LOGIN Deleted from SendBuffer]" << std::endl;
+		}
+		else if (m_DeletedSendPacketLog[i].type == en_PACKET_CS_CHAT_RES_SECTOR_MOVE) {
+			outputFile << "[RES_SECTOR_MOVE Deleted from SendBuffer]" << std::endl;
+		}
+		else if (m_DeletedSendPacketLog[i].type == en_PACKET_CS_CHAT_RES_MESSAGE) {
+			outputFile << "[RES_MESSAGE Deleted from SendBuffer]" << std::endl;
+		}
+		else {
+			DebugBreak();
+		}
+		outputFile << "accountID: " << m_DeletedSendPacketLog[i].accountNo << std::endl;
+	}
+
 	for (USHORT i = 0; i <= m_PlayerLogIdx; i++) {
 		if (m_PlayerLog[i].sessionID == 0) {
 			break;
@@ -51,6 +72,31 @@ void ChattingServer::PlayerFileLog()
 			}
 			else if (m_PlayerLog[i].packetID == en_SESSION_RELEASE) {
 				outputFile << "[SESSION_RELEASE]" << std::endl;
+			}
+			else if (m_PlayerLog[i].packetID == en_PACKET_CS_CHAT_RES_LOGIN) {
+				if (m_PlayerLog[i].sendSuccess) {
+					outputFile << "[RES_LOGIN SUCCESS]" << std::endl;
+				}
+				else {
+					outputFile << "[RES_LOGIN FAIL]" << std::endl;
+				}
+			}
+			else if (m_PlayerLog[i].packetID == en_PACKET_CS_CHAT_RES_SECTOR_MOVE) {
+				if (m_PlayerLog[i].sendSuccess) {
+					outputFile << "[RES_SECTOR_MOVE SUCCESS]" << std::endl;
+				}
+				else {
+					outputFile << "[RES_SECTOR_MOVE FAIL]" << std::endl;
+				}
+			}
+			else if (m_PlayerLog[i].packetID == en_PACKET_CS_CHAT_RES_MESSAGE) {
+				if (m_PlayerLog[i].sendSuccess) {
+					outputFile << "[RES_MESSAGE SUCCESS]" << std::endl;
+				}
+				else {
+					outputFile << "[RES_MESSAGE FAIL]" << std::endl;
+				}
+				outputFile << "destination(sessionID): " << m_PlayerLog[i].sessionID_dest << std::endl;
 			}
 			else {
 				DebugBreak();
@@ -131,10 +177,71 @@ void ChattingServer::OnClientJoin(uint64 sessionID)
 	m_SessionMessageQueueMap.insert({ sessionID, std::queue<JBuffer*>()});
 	// 임시 동기화 객체(메시지 큐 별 동기화 객체 생성)
 	CRITICAL_SECTION* lockPtr = new CRITICAL_SECTION;
+	if (lockPtr == NULL) {
+		DebugBreak();
+	}
 	InitializeCriticalSection(lockPtr);
 	m_SessionMessageQueueLockMap.insert({ sessionID, lockPtr });
 
 	ReleaseSRWLockExclusive(&m_SessionMessageqMapSrwLock);
+}
+
+void ChattingServer::OnDeleteSendPacket(uint64 sessionID, JBuffer& sendRingBuffer)
+{
+	// 세션 송신 큐에 존재하는 송신 직렬화 버퍼 메모리 반환
+	while (sendRingBuffer.GetUseSize() >= sizeof(JBuffer*)) {
+		USHORT logIdx =  InterlockedIncrement16((short*)&m_DeletedSendPacketIdx);
+		memset(&m_DeletedSendPacketLog[logIdx], 0, sizeof(stDeletedSendPacket));
+
+		JBuffer* sendPacket;
+		sendRingBuffer >> sendPacket;
+
+		JBuffer copyPacket(sendPacket->GetUseSize());
+		copyPacket.Enqueue(sendPacket->GetDequeueBufferPtr(), sendPacket->GetUseSize());
+
+		stMSG_HDR hdr;
+		copyPacket.Dequeue((BYTE*)&hdr, sizeof(stMSG_HDR));
+		//Encode(hdr.randKey, hdr.len, hdr.checkSum, sendPacket->GetDequeueBufferPtr());
+		Decode(hdr.randKey, hdr.len, hdr.checkSum, copyPacket.GetDequeueBufferPtr());
+		WORD type;
+		copyPacket.Peek(&type);
+		switch (type)
+		{
+		case en_PACKET_CS_CHAT_RES_LOGIN:
+		{
+			MSG_PACKET_CS_CHAT_RES_LOGIN msg;
+			copyPacket.Dequeue((BYTE*)&msg, sizeof(MSG_PACKET_CS_CHAT_RES_LOGIN));
+
+			m_DeletedSendPacketLog[logIdx].type = en_PACKET_CS_CHAT_RES_LOGIN;
+			m_DeletedSendPacketLog[logIdx].accountNo = msg.AccountNo;
+		}
+		break;
+		case en_PACKET_CS_CHAT_RES_SECTOR_MOVE:
+		{
+			MSG_PACKET_CS_CHAT_RES_SECTOR_MOVE msg;
+			copyPacket.Dequeue((BYTE*)&msg, sizeof(MSG_PACKET_CS_CHAT_RES_SECTOR_MOVE));
+
+			m_DeletedSendPacketLog[logIdx].type = en_PACKET_CS_CHAT_RES_SECTOR_MOVE;
+			m_DeletedSendPacketLog[logIdx].accountNo = msg.AccountNo;
+		}
+		break;
+		case en_PACKET_CS_CHAT_RES_MESSAGE:
+		{
+			MSG_PACKET_CS_CHAT_RES_MESSAGE msg;
+			copyPacket.Dequeue((BYTE*)&msg, sizeof(MSG_PACKET_CS_CHAT_RES_MESSAGE));
+
+			m_DeletedSendPacketLog[logIdx].type = en_PACKET_CS_CHAT_RES_MESSAGE;
+			m_DeletedSendPacketLog[logIdx].accountNo = msg.AccountNo;
+		}
+		break;
+		default:
+			break;
+		}
+
+#if defined(ALLOC_MEM_LOG)
+		m_SerialBuffPoolMgr.GetTlsMemPool().FreeMem(sendPacket, to_string(sessionID) + ", FreeMem (DeleteSession)");
+#endif
+	}
 }
 
 void ChattingServer::OnClientLeave(uint64 sessionID)
@@ -363,9 +470,13 @@ void ChattingServer::ProcessMessage(UINT64 sessionID, size_t msgCnt)
 	std::queue<JBuffer*>& sessionMsgQ = m_SessionMessageQueueMap[sessionID];
 	CRITICAL_SECTION* lockPtr = m_SessionMessageQueueLockMap[sessionID];	// 임시 동기화 객체
 	ReleaseSRWLockShared(&m_SessionMessageqMapSrwLock);
+
+	EnterCriticalSection(lockPtr);	// 임시 동기화 객체
 	if (sessionMsgQ.empty()) {
 		DebugBreak();
 	}
+	LeaveCriticalSection(lockPtr);	// 임시 동기화 객체
+
 	for (size_t i = 0; i < msgCnt; i++) {
 		EnterCriticalSection(lockPtr);						// 임시 동기화 객체
 		JBuffer* msg = sessionMsgQ.front();
@@ -528,13 +639,9 @@ void ChattingServer::Proc_REQ_LOGIN(UINT64 sessionID, MSG_PACKET_CS_CHAT_REQ_LOG
 	ReleaseSRWLockExclusive(&m_SessionAccountMapSrwLock);
 
 #if defined(PLAYER_CREATE_RELEASE_LOG)
-	m_PlayerLog[playerLogIdx].joinFlag = false;
-	m_PlayerLog[playerLogIdx].leaveFlag = false;
 	m_PlayerLog[playerLogIdx].packetID = en_PACKET_CS_CHAT_REQ_LOGIN;
 	m_PlayerLog[playerLogIdx].sessionID = sessionID;
-	//m_PlayerLog[playerLogIdx].sessinIdIndex = (uint16)sessionID;
 	uint64 sessionIdx = sessionID;
-	////sessionIdx <<= 48;
 	m_PlayerLog[playerLogIdx].sessinIdIndex = (uint16)sessionIdx;
 	m_PlayerLog[playerLogIdx].accountNo = accountInfo.AccountNo;
 #endif
@@ -544,6 +651,11 @@ void ChattingServer::Proc_REQ_LOGIN(UINT64 sessionID, MSG_PACKET_CS_CHAT_REQ_LOG
 
 void ChattingServer::Send_RES_LOGIN(UINT64 sessionID, BYTE STATUS, INT64 AccountNo)
 {	
+#if defined(PLAYER_CREATE_RELEASE_LOG)
+	USHORT playerLogIdx = InterlockedIncrement16((short*)&m_PlayerLogIdx);
+	memset(&m_PlayerLog[playerLogIdx], 0, sizeof(stPlayerLog));
+#endif
+
 	//std::cout << "[Send_RES_LOGIN] sessionID: " << sessionID << ", accountNo: " << AccountNo << std::endl;
 	// Unicast Reply
 	JBuffer* sendMessage = m_SerialBuffPoolMgr.GetTlsMemPool().AllocMem(1, to_string(sessionID) + ", Send_RES_LOGIN");
@@ -561,9 +673,23 @@ void ChattingServer::Send_RES_LOGIN(UINT64 sessionID, BYTE STATUS, INT64 Account
 
 	if (!SendPacket(sessionID, sendMessage)) {
 		m_SerialBuffPoolMgr.GetTlsMemPool().FreeMem(sendMessage, "FreeMem (SendPacket Fail, Send_RES_LOGIN)");
+
+#if defined(PLAYER_CREATE_RELEASE_LOG)
+		m_PlayerLog[playerLogIdx].sendSuccess = false;
+#endif
+	}
+	else {
+		m_PlayerLog[playerLogIdx].sendSuccess = true;
 	}
 
-	//m_SerialBuffPoolMgr.GetTlsMemPool().FreeMem(sendMessage);
+#if defined(PLAYER_CREATE_RELEASE_LOG)
+	m_PlayerLog[playerLogIdx].packetID = en_PACKET_CS_CHAT_RES_LOGIN;
+	m_PlayerLog[playerLogIdx].sessionID = sessionID;
+	uint64 sessionIdx = sessionID;
+	m_PlayerLog[playerLogIdx].sessinIdIndex = (uint16)sessionIdx;
+	m_PlayerLog[playerLogIdx].accountNo = AccountNo;
+#endif
+	
 }
 
 void ChattingServer::Proc_REQ_SECTOR_MOVE(UINT64 sessionID, MSG_PACKET_CS_CHAT_REQ_SECTOR_MOVE& body)
@@ -613,6 +739,11 @@ void ChattingServer::Proc_REQ_SECTOR_MOVE(UINT64 sessionID, MSG_PACKET_CS_CHAT_R
 
 void ChattingServer::Send_RES_SECTOR_MOVE(UINT64 sessionID, INT64 AccountNo, WORD SectorX, WORD SectorY)
 {
+#if defined(PLAYER_CREATE_RELEASE_LOG)
+	USHORT playerLogIdx = InterlockedIncrement16((short*)&m_PlayerLogIdx);
+	memset(&m_PlayerLog[playerLogIdx], 0, sizeof(stPlayerLog));
+#endif
+
 	//std::cout << "[Send_RES_SECTOR_MOVE] sessionID: " << sessionID << ", accountNo: " << AccountNo << std::endl;
 	// Unicast Reply
 	JBuffer* sendMessage = m_SerialBuffPoolMgr.GetTlsMemPool().AllocMem(1, to_string(sessionID) + ", Send_RES_SECTOR_MOVE");
@@ -631,9 +762,24 @@ void ChattingServer::Send_RES_SECTOR_MOVE(UINT64 sessionID, INT64 AccountNo, WOR
 	//SendPacket(sessionID, sendMessage);
 	if (!SendPacket(sessionID, sendMessage)) {
 		m_SerialBuffPoolMgr.GetTlsMemPool().FreeMem(sendMessage, "FreeMem (SendPacket Fail, Send_RES_SECTOR_MOVE)");
+
+#if defined(PLAYER_CREATE_RELEASE_LOG)
+		m_PlayerLog[playerLogIdx].sendSuccess = false;
+#endif
+	}
+	else {
+#if defined(PLAYER_CREATE_RELEASE_LOG)
+		m_PlayerLog[playerLogIdx].sendSuccess = true;
+#endif
 	}
 
-	//m_SerialBuffPoolMgr.GetTlsMemPool().FreeMem(sendMessage);
+#if defined(PLAYER_CREATE_RELEASE_LOG)
+	m_PlayerLog[playerLogIdx].packetID = en_PACKET_CS_CHAT_RES_SECTOR_MOVE;
+	m_PlayerLog[playerLogIdx].sessionID = sessionID;
+	uint64 sessionIdx = sessionID;
+	m_PlayerLog[playerLogIdx].sessinIdIndex = (uint16)sessionIdx;
+	m_PlayerLog[playerLogIdx].accountNo = AccountNo;
+#endif
 }
 
 void ChattingServer::Proc_REQ_MESSAGE(UINT64 sessionID, MSG_PACKET_CS_CHAT_REQ_MESSAGE& body, BYTE* message)
@@ -660,8 +806,6 @@ void ChattingServer::Proc_REQ_MESSAGE(UINT64 sessionID, MSG_PACKET_CS_CHAT_REQ_M
 	ReleaseSRWLockShared(&m_SessionAccountMapSrwLock);
 
 #if defined(PLAYER_CREATE_RELEASE_LOG)
-	m_PlayerLog[playerLogIdx].joinFlag = false;
-	m_PlayerLog[playerLogIdx].leaveFlag = false;
 	m_PlayerLog[playerLogIdx].packetID = en_PACKET_CS_CHAT_REQ_MESSAGE;
 	m_PlayerLog[playerLogIdx].sessionID = sessionID;
 	//m_PlayerLog[playerLogIdx].sessinIdIndex = (uint16)sessionID;
@@ -695,11 +839,33 @@ void ChattingServer::Proc_REQ_MESSAGE(UINT64 sessionID, MSG_PACKET_CS_CHAT_REQ_M
 					ownMsgFlag = true;
 				}
 
+#if defined(PLAYER_CREATE_RELEASE_LOG)
+				USHORT logIdx = InterlockedIncrement16((short*)&m_PlayerLogIdx);
+				memset(&m_PlayerLog[logIdx], 0, sizeof(stPlayerLog));
+#endif
+
 				tlsMemPool.IncrementRefCnt(sendMessage, 1, to_string(sessionID) + ", Forwaring Chat Msg to " + to_string(*iter));
 				//std::cout << "[Proc_REQ_MESSAGE | SendPacekt] sessionID: " << *iter << std::endl;
 				if (!SendPacket(*iter, sendMessage)) {
 					m_SerialBuffPoolMgr.GetTlsMemPool().FreeMem(sendMessage, "FreeMem (SendPacket Fail, Forwaring Chat Mst)");
+
+#if defined(PLAYER_CREATE_RELEASE_LOG)
+					m_PlayerLog[logIdx].sendSuccess = false;
+#endif
 				}
+				else {
+#if defined(PLAYER_CREATE_RELEASE_LOG)
+					m_PlayerLog[logIdx].sendSuccess = true;
+#endif
+				}
+#if defined(PLAYER_CREATE_RELEASE_LOG)
+				m_PlayerLog[logIdx].packetID = en_PACKET_CS_CHAT_RES_MESSAGE;
+				m_PlayerLog[logIdx].sessionID = sessionID;
+				uint64 sessionIdx = sessionID;
+				m_PlayerLog[logIdx].sessinIdIndex = (uint16)sessionIdx;
+				m_PlayerLog[logIdx].accountNo = accountInfo.AccountNo;
+				m_PlayerLog[logIdx].sessionID_dest = *iter;
+#endif
 			}
 			ReleaseSRWLockShared(&m_SectorSrwLock[y][x]);
 		}

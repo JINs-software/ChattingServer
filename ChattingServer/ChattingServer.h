@@ -21,9 +21,19 @@ class ChattingServer : public CLanServer
 		uint64 sessinIdIndex;
 		int64 accountNo;
 		en_PACKET_TYPE packetID;
+		bool sendSuccess = false;
+		uint64 sessionID_dest;
 	};
 	USHORT m_PlayerLogIdx;
 	std::vector<stPlayerLog> m_PlayerLog;
+
+	struct stDeletedSendPacket {
+		WORD type;
+		INT64 accountNo;
+	};
+	USHORT m_DeletedSendPacketIdx;
+	std::vector<stDeletedSendPacket> m_DeletedSendPacketLog;
+
 #endif
 public:
 	ChattingServer(const char* serverIP, uint16 serverPort,
@@ -42,6 +52,9 @@ public:
 #if defined(PLAYER_CREATE_RELEASE_LOG)
 		m_PlayerLogIdx = -1;
 		m_PlayerLog.resize(USHRT_MAX + 1);
+
+		m_DeletedSendPacketIdx = -1;
+		m_DeletedSendPacketLog.resize(USHRT_MAX + 1);
 #endif
 		m_RecvEventTlsIndex = TlsAlloc();
 		InitializeSRWLock(&m_SessionMessageqMapSrwLock);
@@ -64,6 +77,7 @@ private:
 	virtual void OnWorkerThreadStart() override;
 	virtual bool OnConnectionRequest(/*IP, Port*/) override;
 	virtual void OnClientJoin(UINT64 sessionID) override;
+	virtual void OnDeleteSendPacket(uint64 sessionID, JBuffer& sendRingBuffer) override;
 	virtual void OnClientLeave(UINT64 sessionID) override;
 	virtual void OnRecv(UINT64 sessionID, JBuffer& recvBuff) override;
 	virtual void OnError() override;
