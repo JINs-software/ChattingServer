@@ -149,7 +149,7 @@ void ChattingServer::OnWorkerThreadStart() {
 
 bool ChattingServer::OnConnectionRequest()
 {
-	return true;
+	return CLanServer::OnConnectionRequest();
 }
 
 void ChattingServer::OnClientJoin(uint64 sessionID)
