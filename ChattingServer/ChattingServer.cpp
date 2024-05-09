@@ -1,115 +1,6 @@
 #include "ChattingServer.h"
 #include <fstream>
 
-void ChattingServer::PlayerFileLog()
-{
-	time_t now = time(0);
-	struct tm timeinfo;
-	char buffer[80];
-	localtime_s(&timeinfo, &now);
-	strftime(buffer, sizeof(buffer), "PlayerLog-%Y-%m-%d_%H-%M-%S", &timeinfo);
-	std::string currentDateTime = std::string(buffer);
-
-	// 파일 경로 생성
-	std::string filePath = "./" + currentDateTime + ".txt";
-
-	// 파일 스트림 열기
-	std::ofstream outputFile(filePath);
-
-	if (!outputFile) {
-		std::cerr << "파일을 열 수 없습니다." << std::endl;
-		return;
-	}
-
-	outputFile << currentDateTime << std::endl;
-
-	for (USHORT i = 0; i <= m_DeletedSendPacketIdx; i++) {
-		if (m_DeletedSendPacketLog[i].accountNo == 0) {
-			break;
-		}
-
-		outputFile << "-------------------------------------------------" << std::endl;
-		if (m_DeletedSendPacketLog[i].type == en_PACKET_CS_CHAT_RES_LOGIN) {
-			outputFile << "[RES_LOGIN Deleted from SendBuffer]" << std::endl;
-		}
-		else if (m_DeletedSendPacketLog[i].type == en_PACKET_CS_CHAT_RES_SECTOR_MOVE) {
-			outputFile << "[RES_SECTOR_MOVE Deleted from SendBuffer]" << std::endl;
-		}
-		else if (m_DeletedSendPacketLog[i].type == en_PACKET_CS_CHAT_RES_MESSAGE) {
-			outputFile << "[RES_MESSAGE Deleted from SendBuffer]" << std::endl;
-		}
-		else {
-			DebugBreak();
-		}
-		outputFile << "accountID: " << m_DeletedSendPacketLog[i].accountNo << std::endl;
-	}
-
-	for (USHORT i = 0; i <= m_PlayerLogIdx; i++) {
-		if (m_PlayerLog[i].sessionID == 0) {
-			break;
-		}
-
-		outputFile << "-------------------------------------------------" << std::endl;
-		if (m_PlayerLog[i].joinFlag) {
-			outputFile << "[OnClientJoin]" << std::endl;
-			outputFile << "sessionID   : " << m_PlayerLog[i].sessionID << std::endl;
-			outputFile << "sessionIndex: " << m_PlayerLog[i].sessinIdIndex << std::endl;
-		}
-		else if (m_PlayerLog[i].leaveFlag) {
-			outputFile << "[OnClientLeave]" << std::endl;
-			outputFile << "sessionID   : " << m_PlayerLog[i].sessionID << std::endl;
-			outputFile << "sessionIndex: " << m_PlayerLog[i].sessinIdIndex << std::endl;
-		}
-		else {
-			if (m_PlayerLog[i].packetID == en_PACKET_CS_CHAT_REQ_LOGIN) {
-				outputFile << "[REQ_LOGIN]" << std::endl;
-			}
-			else if (m_PlayerLog[i].packetID == en_PACKET_CS_CHAT_REQ_SECTOR_MOVE) {
-				outputFile << "[REQ_SECTOR_MOVE]" << std::endl;
-			}
-			else if (m_PlayerLog[i].packetID == en_PACKET_CS_CHAT_REQ_MESSAGE) {
-				outputFile << "[REQ_MESSAGE]" << std::endl;
-			}
-			else if (m_PlayerLog[i].packetID == en_SESSION_RELEASE) {
-				outputFile << "[SESSION_RELEASE]" << std::endl;
-			}
-			else if (m_PlayerLog[i].packetID == en_PACKET_CS_CHAT_RES_LOGIN) {
-				if (m_PlayerLog[i].sendSuccess) {
-					outputFile << "[RES_LOGIN SUCCESS]" << std::endl;
-				}
-				else {
-					outputFile << "[RES_LOGIN FAIL]" << std::endl;
-				}
-			}
-			else if (m_PlayerLog[i].packetID == en_PACKET_CS_CHAT_RES_SECTOR_MOVE) {
-				if (m_PlayerLog[i].sendSuccess) {
-					outputFile << "[RES_SECTOR_MOVE SUCCESS]" << std::endl;
-				}
-				else {
-					outputFile << "[RES_SECTOR_MOVE FAIL]" << std::endl;
-				}
-			}
-			else if (m_PlayerLog[i].packetID == en_PACKET_CS_CHAT_RES_MESSAGE) {
-				if (m_PlayerLog[i].sendSuccess) {
-					outputFile << "[RES_MESSAGE SUCCESS]" << std::endl;
-				}
-				else {
-					outputFile << "[RES_MESSAGE FAIL]" << std::endl;
-				}
-				outputFile << "destination(sessionID): " << m_PlayerLog[i].sessionID_dest << std::endl;
-			}
-			else {
-				DebugBreak();
-			}
-
-			outputFile << "sessionID   : " << m_PlayerLog[i].sessionID << std::endl;
-			outputFile << "sessionIndex: " << m_PlayerLog[i].sessinIdIndex << std::endl;
-			outputFile << "accountNo   : " << m_PlayerLog[i].accountNo << std::endl;
-		}
-	}
-
-}
-
 bool ChattingServer::OnWorkerThreadCreate(HANDLE thHnd)
 {
 	if (m_WorkerThreadCnt >= MAX_WORKER_THREAD_CNT) {
@@ -190,8 +81,10 @@ void ChattingServer::OnDeleteSendPacket(uint64 sessionID, JBuffer& sendRingBuffe
 {
 	// 세션 송신 큐에 존재하는 송신 직렬화 버퍼 메모리 반환
 	while (sendRingBuffer.GetUseSize() >= sizeof(JBuffer*)) {
+#if defined(PLAYER_CREATE_RELEASE_LOG)
 		USHORT logIdx =  InterlockedIncrement16((short*)&m_DeletedSendPacketIdx);
 		memset(&m_DeletedSendPacketLog[logIdx], 0, sizeof(stDeletedSendPacket));
+#endif
 
 		JBuffer* sendPacket;
 		sendRingBuffer >> sendPacket;
@@ -212,8 +105,10 @@ void ChattingServer::OnDeleteSendPacket(uint64 sessionID, JBuffer& sendRingBuffe
 			MSG_PACKET_CS_CHAT_RES_LOGIN msg;
 			copyPacket.Dequeue((BYTE*)&msg, sizeof(MSG_PACKET_CS_CHAT_RES_LOGIN));
 
+#if defined(PLAYER_CREATE_RELEASE_LOG)
 			m_DeletedSendPacketLog[logIdx].type = en_PACKET_CS_CHAT_RES_LOGIN;
 			m_DeletedSendPacketLog[logIdx].accountNo = msg.AccountNo;
+#endif
 		}
 		break;
 		case en_PACKET_CS_CHAT_RES_SECTOR_MOVE:
@@ -221,8 +116,10 @@ void ChattingServer::OnDeleteSendPacket(uint64 sessionID, JBuffer& sendRingBuffe
 			MSG_PACKET_CS_CHAT_RES_SECTOR_MOVE msg;
 			copyPacket.Dequeue((BYTE*)&msg, sizeof(MSG_PACKET_CS_CHAT_RES_SECTOR_MOVE));
 
+#if defined(PLAYER_CREATE_RELEASE_LOG)
 			m_DeletedSendPacketLog[logIdx].type = en_PACKET_CS_CHAT_RES_SECTOR_MOVE;
 			m_DeletedSendPacketLog[logIdx].accountNo = msg.AccountNo;
+#endif
 		}
 		break;
 		case en_PACKET_CS_CHAT_RES_MESSAGE:
@@ -230,8 +127,10 @@ void ChattingServer::OnDeleteSendPacket(uint64 sessionID, JBuffer& sendRingBuffe
 			MSG_PACKET_CS_CHAT_RES_MESSAGE msg;
 			copyPacket.Dequeue((BYTE*)&msg, sizeof(MSG_PACKET_CS_CHAT_RES_MESSAGE));
 
+#if defined(PLAYER_CREATE_RELEASE_LOG)
 			m_DeletedSendPacketLog[logIdx].type = en_PACKET_CS_CHAT_RES_MESSAGE;
 			m_DeletedSendPacketLog[logIdx].accountNo = msg.AccountNo;
+#endif
 		}
 		break;
 		default:
@@ -286,7 +185,7 @@ void ChattingServer::OnClientLeave(uint64 sessionID)
 	HANDLE recvEvent = (HANDLE)TlsGetValue(m_RecvEventTlsIndex);
 	std::queue<stRecvInfo>& recvInfoQ = m_ThreadEventRecvqMap[recvEvent];
 
-	lockPtr = m_ThreadEventLockMap[recvEvent];			// 임시 동기화 객체
+	lockPtr = m_ThreadEventLockMap[recvEvent];								// 임시 동기화 객체
 	EnterCriticalSection(lockPtr);							// 임시 동기화 객체
 	recvInfoQ.push(recvInfo);
 	LeaveCriticalSection(lockPtr);							// 임시 동기화 객체
@@ -679,7 +578,9 @@ void ChattingServer::Send_RES_LOGIN(UINT64 sessionID, BYTE STATUS, INT64 Account
 #endif
 	}
 	else {
+#if defined(PLAYER_CREATE_RELEASE_LOG)
 		m_PlayerLog[playerLogIdx].sendSuccess = true;
+#endif
 	}
 
 #if defined(PLAYER_CREATE_RELEASE_LOG)
@@ -871,8 +772,10 @@ void ChattingServer::Proc_REQ_MESSAGE(UINT64 sessionID, MSG_PACKET_CS_CHAT_REQ_M
 		}
 	}
 	if (!ownMsgFlag) {
+#if defined(PLAYER_CREATE_RELEASE_LOG)
 		PlayerFileLog();
 		DebugBreak();
+#endif
 	}
 
 	tlsMemPool.FreeMem(sendMessage, to_string(sessionID) + ", FreeMem (ChattingServer::Proc_REQ_MESSAGE)");
@@ -884,7 +787,10 @@ void ChattingServer::Proc_REQ_HEARTBEAT()
 
 void ChattingServer::Proc_SessionRelease(UINT64 sessionID)
 {
+	AcquireSRWLockShared(&m_SessionAccountMapSrwLock);
 	stAccoutInfo& accountInfo = m_SessionIdAccountMap[sessionID];
+	ReleaseSRWLockShared(&m_SessionAccountMapSrwLock);
+
 #if defined(PLAYER_CREATE_RELEASE_LOG)
 	USHORT playerLogIdx = InterlockedIncrement16((short*)&m_PlayerLogIdx);
 	memset(&m_PlayerLog[playerLogIdx], 0, sizeof(stPlayerLog));
@@ -923,5 +829,118 @@ void ChattingServer::Proc_SessionRelease(UINT64 sessionID)
 		ReleaseSRWLockExclusive(&m_SectorSrwLock[accountInfo.Y][accountInfo.X]);
 	}
 
+	AcquireSRWLockExclusive(&m_SessionAccountMapSrwLock);
 	m_SessionIdAccountMap.erase(sessionID);
+	ReleaseSRWLockExclusive(&m_SessionAccountMapSrwLock);
 }
+
+#if defined(PLAYER_CREATE_RELEASE_LOG)
+void ChattingServer::PlayerFileLog()
+{
+	time_t now = time(0);
+	struct tm timeinfo;
+	char buffer[80];
+	localtime_s(&timeinfo, &now);
+	strftime(buffer, sizeof(buffer), "PlayerLog-%Y-%m-%d_%H-%M-%S", &timeinfo);
+	std::string currentDateTime = std::string(buffer);
+
+	// 파일 경로 생성
+	std::string filePath = "./" + currentDateTime + ".txt";
+
+	// 파일 스트림 열기
+	std::ofstream outputFile(filePath);
+
+	if (!outputFile) {
+		std::cerr << "파일을 열 수 없습니다." << std::endl;
+		return;
+	}
+
+	outputFile << currentDateTime << std::endl;
+
+	for (USHORT i = 0; i <= m_DeletedSendPacketIdx; i++) {
+		if (m_DeletedSendPacketLog[i].accountNo == 0) {
+			break;
+		}
+
+		outputFile << "-------------------------------------------------" << std::endl;
+		if (m_DeletedSendPacketLog[i].type == en_PACKET_CS_CHAT_RES_LOGIN) {
+			outputFile << "[RES_LOGIN Deleted from SendBuffer]" << std::endl;
+		}
+		else if (m_DeletedSendPacketLog[i].type == en_PACKET_CS_CHAT_RES_SECTOR_MOVE) {
+			outputFile << "[RES_SECTOR_MOVE Deleted from SendBuffer]" << std::endl;
+		}
+		else if (m_DeletedSendPacketLog[i].type == en_PACKET_CS_CHAT_RES_MESSAGE) {
+			outputFile << "[RES_MESSAGE Deleted from SendBuffer]" << std::endl;
+		}
+		else {
+			DebugBreak();
+		}
+		outputFile << "accountID: " << m_DeletedSendPacketLog[i].accountNo << std::endl;
+	}
+
+	for (USHORT i = 0; i <= m_PlayerLogIdx; i++) {
+		if (m_PlayerLog[i].sessionID == 0) {
+			break;
+		}
+
+		outputFile << "-------------------------------------------------" << std::endl;
+		if (m_PlayerLog[i].joinFlag) {
+			outputFile << "[OnClientJoin]" << std::endl;
+			outputFile << "sessionID   : " << m_PlayerLog[i].sessionID << std::endl;
+			outputFile << "sessionIndex: " << m_PlayerLog[i].sessinIdIndex << std::endl;
+		}
+		else if (m_PlayerLog[i].leaveFlag) {
+			outputFile << "[OnClientLeave]" << std::endl;
+			outputFile << "sessionID   : " << m_PlayerLog[i].sessionID << std::endl;
+			outputFile << "sessionIndex: " << m_PlayerLog[i].sessinIdIndex << std::endl;
+		}
+		else {
+			if (m_PlayerLog[i].packetID == en_PACKET_CS_CHAT_REQ_LOGIN) {
+				outputFile << "[REQ_LOGIN]" << std::endl;
+			}
+			else if (m_PlayerLog[i].packetID == en_PACKET_CS_CHAT_REQ_SECTOR_MOVE) {
+				outputFile << "[REQ_SECTOR_MOVE]" << std::endl;
+			}
+			else if (m_PlayerLog[i].packetID == en_PACKET_CS_CHAT_REQ_MESSAGE) {
+				outputFile << "[REQ_MESSAGE]" << std::endl;
+			}
+			else if (m_PlayerLog[i].packetID == en_SESSION_RELEASE) {
+				outputFile << "[SESSION_RELEASE]" << std::endl;
+			}
+			else if (m_PlayerLog[i].packetID == en_PACKET_CS_CHAT_RES_LOGIN) {
+				if (m_PlayerLog[i].sendSuccess) {
+					outputFile << "[RES_LOGIN SUCCESS]" << std::endl;
+				}
+				else {
+					outputFile << "[RES_LOGIN FAIL]" << std::endl;
+				}
+			}
+			else if (m_PlayerLog[i].packetID == en_PACKET_CS_CHAT_RES_SECTOR_MOVE) {
+				if (m_PlayerLog[i].sendSuccess) {
+					outputFile << "[RES_SECTOR_MOVE SUCCESS]" << std::endl;
+				}
+				else {
+					outputFile << "[RES_SECTOR_MOVE FAIL]" << std::endl;
+				}
+			}
+			else if (m_PlayerLog[i].packetID == en_PACKET_CS_CHAT_RES_MESSAGE) {
+				if (m_PlayerLog[i].sendSuccess) {
+					outputFile << "[RES_MESSAGE SUCCESS]" << std::endl;
+				}
+				else {
+					outputFile << "[RES_MESSAGE FAIL]" << std::endl;
+				}
+				outputFile << "destination(sessionID): " << m_PlayerLog[i].sessionID_dest << std::endl;
+			}
+			else {
+				DebugBreak();
+			}
+
+			outputFile << "sessionID   : " << m_PlayerLog[i].sessionID << std::endl;
+			outputFile << "sessionIndex: " << m_PlayerLog[i].sessinIdIndex << std::endl;
+			outputFile << "accountNo   : " << m_PlayerLog[i].accountNo << std::endl;
+		}
+	}
+
+}
+#endif

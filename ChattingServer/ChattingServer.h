@@ -9,7 +9,7 @@
 #include <set>
 #include <unordered_map>
 
-#define PLAYER_CREATE_RELEASE_LOG
+//#define PLAYER_CREATE_RELEASE_LOG
 
 class ChattingServer : public CLanServer
 {
@@ -34,6 +34,8 @@ class ChattingServer : public CLanServer
 	USHORT m_DeletedSendPacketIdx;
 	std::vector<stDeletedSendPacket> m_DeletedSendPacketLog;
 
+public:
+	void PlayerFileLog();
 #endif
 public:
 	ChattingServer(const char* serverIP, uint16 serverPort,
@@ -69,8 +71,6 @@ public:
 		InitializeSRWLock(&m_SessionAccountMapSrwLock);
 	}
 
-	void PlayerFileLog();
-
 private:
 	virtual bool OnWorkerThreadCreate(HANDLE thHnd) override;
 	virtual void OnWorkerThreadCreateDone() override;
@@ -98,24 +98,44 @@ private:
 
 	// 작업자 스레드 수신 이벤트 <-> RecvInfo 큐 맵핑
 	std::unordered_map<HANDLE, std::queue<stRecvInfo>>	m_ThreadEventRecvqMap;
-	// 임시 동기화 객체 (락-프리 적용 전)
+	// 임시 동기화 객체 (추후 락-프리 큐로 변경)
+	// 충돌 대상: 멀티-프로세싱(업데이트) 스레드 간
 	std::unordered_map < HANDLE, CRITICAL_SECTION*>		m_ThreadEventLockMap;
 
 	// 세션 별 자료구조
 	std::set<UINT64>	m_LoginWaitSessions;
+	// std::mutex 동기화 객체
+	// 충돌 대상: IOCP 작업자 스레드들과 프로세싱(업데이트) 스레드 간
 	std::mutex			m_LoginWaitSessionsMtx;
 
 	std::unordered_map<UINT64, std::queue<JBuffer*>>		m_SessionMessageQueueMap;
 	SRWLOCK	m_SessionMessageqMapSrwLock;
-	// 임시 동기화 객체 (락-프리 적용 전)
+	// 임시 동기화 객체 (추후 락-프리 큐로 변경)
+	// 충돌 대상: IOCP 작업자 스레드(Enqueue)와 멀티-프로세싱(업데이트)(Dequeue) 스레드 간
 	std::unordered_map<UINT64, CRITICAL_SECTION*>			m_SessionMessageQueueLockMap; // 메시지 큐 별 동기화 객체
 
 	std::unordered_map<UINT64, stAccoutInfo>				m_SessionIdAccountMap;
+	// SRWLOCK 동기화 객체
+	// 충돌 대상: 멀티-프로세싱(업데이트) 스레드 간
+	// AcquireSRWLockExclusive:
+	//	- REQ_LOGIN 패킷 처리 -> 계정(account) 생성 후 삽입
+	//	- SESSION_RELEASE 처리 -> 계정 erase
+	// AcquireSRWLockShared:
+	//	- REQ_SECTOR_MOVE 처리
+	//	- REQ_MESSAGE 패킷 처리
+	//	- SESSION_RELEASE 처리(계정 정보 참조)
 	SRWLOCK m_SessionAccountMapSrwLock;
 
 	// Process Thread
 	HANDLE m_ProcessThreadHnd;
 	std::set<UINT64> m_SectorMap[dfSECTOR_Y_MAX+1][dfSECTOR_X_MAX+1];
+	// SRWLOCK 동기화 객체
+	// 충돌 대상: 멀티-프로세싱(업데이트) 스레드 간
+	// AcquireSRWLockExclusive:
+	//	- REQ_SECTOR_MOVE 처리
+	//	- SESSION_RELEASE 처리
+	// AcquireSRWLockShared:
+	//	- REQ_MESSAGE 패킷 처리
 	SRWLOCK m_SectorSrwLock[dfSECTOR_Y_MAX + 1][dfSECTOR_X_MAX + 1];
 
 private:
