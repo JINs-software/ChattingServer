@@ -30,7 +30,9 @@ int main() {
 			}
 			else if (ctr == 'p' || ctr == 'P') {
 				chatserver.SessionReleaseLog();
+#if defined(PLAYER_CREATE_RELEASE_LOG)
 				chatserver.PlayerFileLog();
+#endif
 				DebugBreak();
 			}
 		}
