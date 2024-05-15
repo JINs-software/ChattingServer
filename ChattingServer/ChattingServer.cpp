@@ -366,8 +366,16 @@ void ChattingServer::ProcessMessage(UINT64 sessionID, size_t msgCnt)
 {
 	// 세션 별 메시지 큐로부터 메시지 획득
 	AcquireSRWLockShared(&m_SessionMessageqMapSrwLock);
-	std::queue<JBuffer*>& sessionMsgQ = m_SessionMessageQueueMap[sessionID];
-	CRITICAL_SECTION* lockPtr = m_SessionMessageQueueLockMap[sessionID];	// 임시 동기화 객체
+
+	auto msgQueueIter = m_SessionMessageQueueMap.find(sessionID);
+	auto msgQueueLockIter = m_SessionMessageQueueLockMap.find(sessionID);
+	if (msgQueueIter == m_SessionMessageQueueMap.end() || msgQueueLockIter == m_SessionMessageQueueLockMap.end()) {
+		// 세션 삭제 메시지가 먼저 큐에 들어옴 -> 세션 관련 자료구조 삭제
+		return;
+	}
+	std::queue<JBuffer*>& sessionMsgQ = msgQueueIter->second;
+	CRITICAL_SECTION* lockPtr = msgQueueLockIter->second;
+
 	ReleaseSRWLockShared(&m_SessionMessageqMapSrwLock);
 
 	EnterCriticalSection(lockPtr);	// 임시 동기화 객체
@@ -812,9 +820,19 @@ void ChattingServer::Proc_SessionRelease(UINT64 sessionID)
 		CRITICAL_SECTION* lockPtr = lockIter->second;
 		DeleteCriticalSection(lockPtr);
 		m_SessionMessageQueueLockMap.erase(lockIter);
+		delete lockPtr;
 	}
 	auto iter = m_SessionMessageQueueMap.find(sessionID);
 	if (iter != m_SessionMessageQueueMap.end()) {
+		std::queue<JBuffer*>& sessionMsgQ = m_SessionMessageQueueMap[sessionID];
+		
+		// 남은 메시지 정리
+		while (!sessionMsgQ.empty()) {
+			JBuffer* msg = sessionMsgQ.front();
+			sessionMsgQ.pop();
+			m_SerialBuffPoolMgr.GetTlsMemPool().FreeMem(msg, to_string(sessionID) + ", FreeMem (ChattingServer::Proc_SessionRelease)");
+		}
+		
 		m_SessionMessageQueueMap.erase(iter);
 	}
 	ReleaseSRWLockExclusive(&m_SessionMessageqMapSrwLock);
