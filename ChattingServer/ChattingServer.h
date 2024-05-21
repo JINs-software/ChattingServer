@@ -9,7 +9,7 @@
 #include <set>
 #include <unordered_map>
 
-//#define PLAYER_CREATE_RELEASE_LOG
+#define PLAYER_CREATE_RELEASE_LOG
 
 class ChattingServer : public CLanServer
 {
@@ -17,15 +17,29 @@ class ChattingServer : public CLanServer
 	struct stPlayerLog {
 		bool joinFlag = false;
 		bool leaveFlag = false;
+		bool recvFlag = false;
+		bool procMsgFlag = false;
 		uint64 sessionID = 0;
 		uint64 sessinIdIndex;
 		int64 accountNo;
 		en_PACKET_TYPE packetID;
 		bool sendSuccess = false;
 		uint64 sessionID_dest;
+
+		uint64 uint0;
+
+		void Init() {
+			memset(this, 0, sizeof(stPlayerLog));
+		}
 	};
 	USHORT m_PlayerLogIdx;
 	std::vector<stPlayerLog> m_PlayerLog;
+	stPlayerLog& GetPlayerLog() {
+		USHORT playerLogIdx = InterlockedIncrement16((short*)&m_PlayerLogIdx);
+		m_PlayerLog[playerLogIdx].Init();
+
+		return m_PlayerLog[playerLogIdx];
+	}
 
 	struct stDeletedSendPacket {
 		WORD type;
@@ -77,10 +91,28 @@ private:
 	virtual void OnWorkerThreadStart() override;
 	virtual bool OnConnectionRequest(/*IP, Port*/) override;
 	virtual void OnClientJoin(UINT64 sessionID) override;
-	virtual void OnDeleteSendPacket(uint64 sessionID, JBuffer& sendRingBuffer) override;
+	//virtual void OnDeleteSendPacket(uint64 sessionID, JBuffer& sendRingBuffer) override;
 	virtual void OnClientLeave(UINT64 sessionID) override;
 	virtual void OnRecv(UINT64 sessionID, JBuffer& recvBuff) override;
 	virtual void OnError() override;
+
+public:
+	virtual void ServerConsoleLog() override {
+		std::cout << "[thread recvInfo queue]" << std::endl;
+		for (auto recvq : m_ThreadEventRecvqMap) {
+			std::cout << "	size: " << recvq.second.size() << std::endl;
+		}
+		std::cout << "[Login Wait Session] : " << m_LoginWaitSessions.size() << std::endl;
+		std::cout << "[Session Msg Queue Cnt] : " << m_SessionMessageQueueMap.size() << std::endl;
+		std::cout << "[Account Map size] : " << m_SessionIdAccountMap.size() << std::endl;
+		int sectorCnt = 0;
+		for (int y = 0; y <= dfSECTOR_Y_MAX; y++) {
+			for (int x = 0; x <= dfSECTOR_X_MAX; x++) {
+				sectorCnt += m_SectorMap[y][x].size();
+			}
+		}
+		std::cout << "[Sector Member Cnt] : " << sectorCnt << std::endl;
+	}
 
 private:
 	size_t	m_LimitAcceptance;
@@ -154,5 +186,6 @@ private:
 	void Proc_REQ_HEARTBEAT();
 	
 	void Proc_SessionRelease(UINT64 sessionID);
+	void Proc_SessionReleaseBeforeLogin(UINT64 sessionID);
 };
 
