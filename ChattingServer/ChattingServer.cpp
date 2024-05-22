@@ -172,9 +172,20 @@ void ChattingServer::OnClientLeave(uint64 sessionID)
 	else {
 		(*message) << (WORD)en_SESSION_RELEASE;
 	}
+
+	// 메시지 큐 & 메시지 큐 동기화 객체 GET
 	AcquireSRWLockShared(&m_SessionMessageqMapSrwLock);
-	std::queue<JBuffer*>& sessionMsgQ = m_SessionMessageQueueMap[sessionID];
-	CRITICAL_SECTION* lockPtr = m_SessionMessageQueueLockMap[sessionID];		// 임시 동기화 객체
+	//std::queue<JBuffer*>& sessionMsgQ = m_SessionMessageQueueMap[sessionID];
+	//CRITICAL_SECTION* lockPtr = m_SessionMessageQueueLockMap[sessionID];		// 임시 동기화 객체
+	auto msgQueueIter = m_SessionMessageQueueMap.find(sessionID);
+	auto msgQueueLockIter = m_SessionMessageQueueLockMap.find(sessionID);
+	if (msgQueueIter == m_SessionMessageQueueMap.end() || msgQueueLockIter == m_SessionMessageQueueLockMap.end()) {
+		SessionReleaseLog();
+		PlayerFileLog();
+		DebugBreak();
+	}
+	std::queue<JBuffer*>& sessionMsgQ = msgQueueIter->second;
+	CRITICAL_SECTION* lockPtr = msgQueueLockIter->second;
 	ReleaseSRWLockShared(&m_SessionMessageqMapSrwLock);
 
 	EnterCriticalSection(lockPtr);								// 임시 동기화 객체
@@ -277,10 +288,20 @@ void ChattingServer::OnRecv(uint64 sessionID, JBuffer& recvBuff)
 			
 			if (message != NULL) {
 				// .. 세션 별 메시지 큐 삽입
+				// 메시지 큐 & 메시지 큐 동기화 객체 GET
 				AcquireSRWLockShared(&m_SessionMessageqMapSrwLock);
-				std::queue<JBuffer*>& sessionMsgQ = m_SessionMessageQueueMap[sessionID];
-				CRITICAL_SECTION* lockPtr = m_SessionMessageQueueLockMap[sessionID];		// 임시 동기화 객체
-				ReleaseSRWLockShared(&m_SessionMessageqMapSrwLock);							
+				//std::queue<JBuffer*>& sessionMsgQ = m_SessionMessageQueueMap[sessionID];
+				//CRITICAL_SECTION* lockPtr = m_SessionMessageQueueLockMap[sessionID];		// 임시 동기화 객체
+				auto msgQueueIter = m_SessionMessageQueueMap.find(sessionID);
+				auto msgQueueLockIter = m_SessionMessageQueueLockMap.find(sessionID);
+				if (msgQueueIter == m_SessionMessageQueueMap.end() || msgQueueLockIter == m_SessionMessageQueueLockMap.end()) {
+					SessionReleaseLog();
+					PlayerFileLog();
+					DebugBreak();
+				}
+				std::queue<JBuffer*>& sessionMsgQ = msgQueueIter->second;
+				CRITICAL_SECTION* lockPtr = msgQueueLockIter->second;
+				ReleaseSRWLockShared(&m_SessionMessageqMapSrwLock);
 
 				EnterCriticalSection(lockPtr);								// 임시 동기화 객체
 				sessionMsgQ.push(message);
