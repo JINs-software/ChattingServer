@@ -893,6 +893,9 @@ void ChattingServer::Proc_REQ_MESSAGE(UINT64 sessionID, MSG_PACKET_CS_CHAT_REQ_M
 //#endif
 //				}
 
+
+				//destinationSessions.insert(*iter);
+				// => 하단 범위 기반 for문에서 operator++ 런타임 에러 발생(트리 노드의 parent 참조 시 에러 원인 분석 필요)
 				UINT64 destinationSessionID = *iter;
 				destinationSessions.insert(destinationSessionID);
 
