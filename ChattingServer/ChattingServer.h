@@ -67,6 +67,7 @@ public:
 		m_ProcessThreadCnt(processThreadCnt)
 	{
 		m_ProcessThreadHnds.resize(m_ProcessThreadCnt);
+		m_ProcessStopEvent = CreateEvent(NULL, true, false, NULL);
 
 #if defined(PLAYER_CREATE_RELEASE_LOG)
 		m_PlayerLogIdx = -1;
@@ -86,6 +87,11 @@ public:
 		}
 
 		InitializeSRWLock(&m_SessionAccountMapSrwLock);
+	}
+	void Stop() {
+		SetEvent(m_ProcessStopEvent);
+
+		CLanServer::Stop();
 	}
 
 private:
@@ -186,6 +192,8 @@ private:
 	////////////////////////////////////////////
 	UINT m_ProcessThreadCnt;
 	std::vector<HANDLE> m_ProcessThreadHnds;
+	HANDLE m_ProcessStopEvent;
+	
 
 private:
 	// Process Thread Working Function

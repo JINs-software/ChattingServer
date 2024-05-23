@@ -360,13 +360,22 @@ UINT __stdcall ChattingServer::ProcessThreadFunc(void* arg)
 													// AllocTlsMemPool()로 부터 반환된 인덱스는 IOCP 작업자 스레드 도입부에서 CLanServer 멤버에 저장되었다 가정
 #endif
 
+	// 종료 이벤트 추가
+	HANDLE events[MAX_WORKER_THREAD_CNT + 1];
+	events[0] = server->m_ProcessStopEvent;
+	memcpy(&events[1], server->m_WorkerThreadRecvEvents, sizeof(m_WorkerThreadRecvEvents));
+
 	while (true) {
-		DWORD ret = WaitForMultipleObjects(server->m_WorkerThreadCnt, server->m_WorkerThreadRecvEvents, FALSE, INFINITE);
-		if (WAIT_OBJECT_0 <= ret && ret < WAIT_OBJECT_0 + server->m_WorkerThreadCnt) {
-			
+		//DWORD ret = WaitForMultipleObjects(server->m_WorkerThreadCnt, server->m_WorkerThreadRecvEvents, FALSE, INFINITE);
+		DWORD ret = WaitForMultipleObjects(server->m_WorkerThreadCnt + 1, events, FALSE, INFINITE);
+		if (ret == WAIT_OBJECT_0) {
+			break;
+		}
+		else if (WAIT_OBJECT_0 + 1 <= ret && ret < WAIT_OBJECT_0 + 1 + server->m_WorkerThreadCnt) {
+			DWORD thEventIdx = ret - 1;
 			// IOCP 작업자 스레드의 수신 이벤트(recvEvent), 수신 큐(recvQ), 수신 이벤트에 대한 동기화 객체(lockPtr) 관리 자료구조는
 			// 프로세스 스레드의 동작 중에는 변경 없음을 가정.
-			HANDLE recvEvent = server->m_WorkerThreadRecvEvents[ret];
+			HANDLE recvEvent = server->m_WorkerThreadRecvEvents[thEventIdx];
 			std::queue<stRecvInfo>& recvQ = server->m_ThreadEventRecvqMap[recvEvent];
 			CRITICAL_SECTION* lockPtr = server->m_ThreadEventLockMap[recvEvent];		// 임시 동기화 객체
 
@@ -398,7 +407,9 @@ UINT __stdcall ChattingServer::ProcessThreadFunc(void* arg)
 				if (!emptyFlag) {
 					server->ProcessMessage(recvInfo.sessionID, recvInfo.recvMsgCnt);
 				}
-
+				else {
+					break;
+				}
 			}
 		}
 		else {
@@ -407,6 +418,8 @@ UINT __stdcall ChattingServer::ProcessThreadFunc(void* arg)
 		}
 
 	}
+
+	return 0;
 }
 
 void ChattingServer::ProcessMessage(UINT64 sessionID, size_t msgCnt)
@@ -880,7 +893,8 @@ void ChattingServer::Proc_REQ_MESSAGE(UINT64 sessionID, MSG_PACKET_CS_CHAT_REQ_M
 //#endif
 //				}
 
-				destinationSessions.insert(*iter);
+				UINT64 destinationSessionID = *iter;
+				destinationSessions.insert(destinationSessionID);
 
 //#if defined(PLAYER_CREATE_RELEASE_LOG)
 //				m_PlayerLog[logIdx].packetID = en_PACKET_CS_CHAT_RES_MESSAGE;
