@@ -52,7 +52,7 @@ public:
 	void PlayerFileLog();
 #endif
 public:
-	ChattingServer(const char* serverIP, uint16 serverPort,
+	ChattingServer(uint8 processThreadCnt, const char* serverIP, uint16 serverPort,
 		DWORD numOfIocpConcurrentThrd, uint16 numOfWorkerThreads, uint16 maxOfConnections,
 		size_t tlsMemPoolDefaultUnitCnt = CHAT_TLS_MEM_POOL_DEFAULT_UNIT_CNT, size_t tlsMemPoolDefaultCapacity = CHAT_TLS_MEM_POOL_DEFAULT_UNIT_CAPACITY,
 		uint32 sessionSendBuffSize = CHAT_SERV_SESSION_SEND_BUFF_SIZE, uint32 sessionRecvBuffSize = CHAT_SERV_SESSION_RECV_BUFF_SIZE,
@@ -63,8 +63,11 @@ public:
 			sessionSendBuffSize, sessionRecvBuffSize
 			), 
 		m_WorkerThreadCnt(0),
-		m_LimitAcceptance(maxOfConnections)
+		m_LimitAcceptance(maxOfConnections),
+		m_ProcessThreadCnt(processThreadCnt)
 	{
+		m_ProcessThreadHnds.resize(m_ProcessThreadCnt);
+
 #if defined(PLAYER_CREATE_RELEASE_LOG)
 		m_PlayerLogIdx = -1;
 		m_PlayerLog.resize(USHRT_MAX + 1);
@@ -76,8 +79,8 @@ public:
 		InitializeSRWLock(&m_SessionMessageqMapSrwLock);
 
 		// SRWLOCK m_SectorSrwLock[dfSECTOR_Y_MAX + 1][dfSECTOR_X_MAX + 1];
-		for (WORD i = 0; i < dfSECTOR_Y_MAX + 1; i++) {
-			for (WORD j = 0; j < dfSECTOR_X_MAX + 1; j++) {
+		for (WORD i = 0; i <= dfSECTOR_Y_MAX; i++) {
+			for (WORD j = 0; j <= dfSECTOR_X_MAX; j++) {
 				InitializeSRWLock(&m_SectorSrwLock[i][j]);
 			}
 		}
@@ -146,7 +149,14 @@ private:
 	// 충돌 대상: IOCP 작업자 스레드(Enqueue)와 멀티-프로세싱(업데이트)(Dequeue) 스레드 간
 	std::unordered_map<UINT64, CRITICAL_SECTION*>			m_SessionMessageQueueLockMap; // 메시지 큐 별 동기화 객체
 
-	std::unordered_map<UINT64, stAccoutInfo>				m_SessionIdAccountMap;
+	////////////////////////////////////////////
+	// Account 정보 관리
+	////////////////////////////////////////////
+	//std::unordered_map<UINT64, stAccoutInfo>				m_SessionIdAccountMap;
+	// => stAccoutInfo에 대한 레퍼런스 카운팅 필요
+	std::unordered_map<UINT64, std::shared_ptr<stAccoutInfo>>	m_SessionIdAccountMap;
+	
+	
 	// SRWLOCK 동기화 객체
 	// 충돌 대상: 멀티-프로세싱(업데이트) 스레드 간
 	// AcquireSRWLockExclusive:
@@ -158,8 +168,9 @@ private:
 	//	- SESSION_RELEASE 처리(계정 정보 참조)
 	SRWLOCK m_SessionAccountMapSrwLock;
 
-	// Process Thread
-	HANDLE m_ProcessThreadHnd;
+	////////////////////////////////////////////
+	// Sector 관리
+	////////////////////////////////////////////
 	std::set<UINT64> m_SectorMap[dfSECTOR_Y_MAX+1][dfSECTOR_X_MAX+1];
 	// SRWLOCK 동기화 객체
 	// 충돌 대상: 멀티-프로세싱(업데이트) 스레드 간
@@ -169,6 +180,12 @@ private:
 	// AcquireSRWLockShared:
 	//	- REQ_MESSAGE 패킷 처리
 	SRWLOCK m_SectorSrwLock[dfSECTOR_Y_MAX + 1][dfSECTOR_X_MAX + 1];
+
+	////////////////////////////////////////////
+	// Process(Update) Thread
+	////////////////////////////////////////////
+	UINT m_ProcessThreadCnt;
+	std::vector<HANDLE> m_ProcessThreadHnds;
 
 private:
 	// Process Thread Working Function

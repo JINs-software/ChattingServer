@@ -18,7 +18,13 @@ bool ChattingServer::OnWorkerThreadCreate(HANDLE thHnd)
 
 void ChattingServer::OnWorkerThreadCreateDone()
 {
-	m_ProcessThreadHnd = (HANDLE)_beginthreadex(NULL, 0, ProcessThreadFunc, this, 0, NULL);
+	//m_ProcessThreadHnd = (HANDLE)_beginthreadex(NULL, 0, ProcessThreadFunc, this, 0, NULL);
+	for (UINT8 i = 0; i < m_ProcessThreadCnt; i++) {
+		m_ProcessThreadHnds[i] = (HANDLE)_beginthreadex(NULL, 0, ProcessThreadFunc, this, 0, NULL);
+		if (m_ProcessThreadHnds[i] == NULL) {
+			DebugBreak();
+		}
+	}
 }
 
 void ChattingServer::OnWorkerThreadStart() {
@@ -349,30 +355,50 @@ UINT __stdcall ChattingServer::ProcessThreadFunc(void* arg)
 {
 	ChattingServer* server = (ChattingServer*)arg;
 #if defined(ALLOC_BY_TLS_MEM_POOL)
-	server->m_SerialBuffPoolIdx = server->m_SerialBuffPoolMgr.AllocTlsMemPool();	// 생성자에서 설정한 Default 값을 따름
+	// 상위 서버 클래스에서 관리하는 메모리 풀 
+	server->m_SerialBuffPoolMgr.AllocTlsMemPool();	// 생성자에서 설정한 Default 값을 따름
+													// AllocTlsMemPool()로 부터 반환된 인덱스는 IOCP 작업자 스레드 도입부에서 CLanServer 멤버에 저장되었다 가정
 #endif
 
 	while (true) {
 		DWORD ret = WaitForMultipleObjects(server->m_WorkerThreadCnt, server->m_WorkerThreadRecvEvents, FALSE, INFINITE);
 		if (WAIT_OBJECT_0 <= ret && ret < WAIT_OBJECT_0 + server->m_WorkerThreadCnt) {
+			
+			// IOCP 작업자 스레드의 수신 이벤트(recvEvent), 수신 큐(recvQ), 수신 이벤트에 대한 동기화 객체(lockPtr) 관리 자료구조는
+			// 프로세스 스레드의 동작 중에는 변경 없음을 가정.
 			HANDLE recvEvent = server->m_WorkerThreadRecvEvents[ret];
 			std::queue<stRecvInfo>& recvQ = server->m_ThreadEventRecvqMap[recvEvent];
 			CRITICAL_SECTION* lockPtr = server->m_ThreadEventLockMap[recvEvent];		// 임시 동기화 객체
-			//if (recvQ.size() > 1) {
-			//	DebugBreak();
+
+			//size_t recvQueueSize = recvQ.size();	// -> 이 크기에 포함되지 않은 수신 정보는 다음 이벤트에서 확인됨이 보장.
+			//// OnRecv 쪽에서 (1) 수신 정보 인큐, (2) SetEvent 순 이기에...
+			//for (size_t i = 0; i < recvQueueSize; i++) {
+			//	EnterCriticalSection(lockPtr);							// 임시 동기화 객체
+			//	stRecvInfo& recvInfo = recvQ.front();
+			//	UINT64 sessionID = recvInfo.sessionID;
+			//	size_t recvSize = recvInfo.recvMsgCnt;
+			//	recvQ.pop();
+			//	LeaveCriticalSection(lockPtr);							// 임시 동기화 객체	
+			//
+			//	server->ProcessMessage(sessionID, recvSize);
 			//}
 
-			size_t recvQueueSize = recvQ.size();	// -> 이 크기에 포함되지 않은 수신 정보는 다음 이벤트에서 확인됨이 보장.
-			// OnRecv 쪽에서 (1) 수신 정보 인큐, (2) SetEvent 순 이기에...
-			for (size_t i = 0; i < recvQueueSize; i++) {
-				EnterCriticalSection(lockPtr);							// 임시 동기화 객체
-				stRecvInfo& recvInfo = recvQ.front();
-				UINT64 sessionID = recvInfo.sessionID;
-				size_t recvSize = recvInfo.recvMsgCnt;
-				recvQ.pop();
-				LeaveCriticalSection(lockPtr);							// 임시 동기화 객체	
+			while (true) {
+				// 프로세싱 스레드가 단일 세션에 대해 recvInfo를 처리하는 동안은 작업자 스레드의 recvInfo ...
+				stRecvInfo recvInfo;
+				bool emptyFlag = true;
+				EnterCriticalSection(lockPtr);
+				if (!recvQ.empty()) {
+					recvInfo = recvQ.front();
+					recvQ.pop();
+					emptyFlag = false;
+				}
+				LeaveCriticalSection(lockPtr);
 
-				server->ProcessMessage(sessionID, recvSize);
+				if (!emptyFlag) {
+					server->ProcessMessage(recvInfo.sessionID, recvInfo.recvMsgCnt);
+				}
+
 			}
 		}
 		else {
@@ -406,21 +432,18 @@ void ChattingServer::ProcessMessage(UINT64 sessionID, size_t msgCnt)
 		return;
 	}
 	std::queue<JBuffer*>& sessionMsgQ = msgQueueIter->second;
-	CRITICAL_SECTION* lockPtr = msgQueueLockIter->second;
+	CRITICAL_SECTION* sessionMsgQLock = msgQueueLockIter->second;
 
 	ReleaseSRWLockShared(&m_SessionMessageqMapSrwLock);
 
-	EnterCriticalSection(lockPtr);	// 임시 동기화 객체
-	if (sessionMsgQ.empty()) {
-		DebugBreak();
-	}
-	LeaveCriticalSection(lockPtr);	// 임시 동기화 객체
 
 	for (size_t i = 0; i < msgCnt; i++) {
-		EnterCriticalSection(lockPtr);						// 임시 동기화 객체
+		EnterCriticalSection(sessionMsgQLock);						// 임시 동기화 객체
 		JBuffer* msg = sessionMsgQ.front();
 		sessionMsgQ.pop();
-		LeaveCriticalSection(lockPtr);						// 임시 동기화 객체
+
+		//LeaveCriticalSection(sessionMsgQLock);						
+		// => 단일 메시지 처리 동안은 메시지 큐 락 (멀티 스레드에서 단일 세션에서의 순서 제어)
 
 		WORD type;
 		msg->Peek(&type);
@@ -477,6 +500,8 @@ void ChattingServer::ProcessMessage(UINT64 sessionID, size_t msgCnt)
 		}
 
 		m_SerialBuffPoolMgr.GetTlsMemPool().FreeMem(msg, to_string(sessionID) + ", FreeMem (ChattingServer::ProcessMessage)");
+
+		LeaveCriticalSection(sessionMsgQLock);
 	}
 }
 
@@ -568,9 +593,16 @@ void ChattingServer::Proc_REQ_LOGIN(UINT64 sessionID, MSG_PACKET_CS_CHAT_REQ_LOG
 
 	if (!releaseBeforeLogin) {
 
-		stAccoutInfo accountInfo;
-		memcpy(&accountInfo, &body.AccountNo, sizeof(stAccoutInfo));
-		accountInfo.X = -1;
+		//stAccoutInfo accountInfo;
+		//memcpy(&accountInfo, &body.AccountNo, sizeof(stAccoutInfo));
+		//accountInfo.X = -1;
+		//AcquireSRWLockExclusive(&m_SessionAccountMapSrwLock);
+		//m_SessionIdAccountMap.insert({ sessionID, accountInfo });
+		//ReleaseSRWLockExclusive(&m_SessionAccountMapSrwLock);
+
+		std::shared_ptr<stAccoutInfo> accountInfo = std::make_shared<stAccoutInfo>();
+		accountInfo->AccountNo = body.AccountNo;
+		accountInfo->X = -1;
 		AcquireSRWLockExclusive(&m_SessionAccountMapSrwLock);
 		m_SessionIdAccountMap.insert({ sessionID, accountInfo });
 		ReleaseSRWLockExclusive(&m_SessionAccountMapSrwLock);
@@ -580,10 +612,10 @@ void ChattingServer::Proc_REQ_LOGIN(UINT64 sessionID, MSG_PACKET_CS_CHAT_REQ_LOG
 		m_PlayerLog[playerLogIdx].sessionID = sessionID;
 		uint64 sessionIdx = sessionID;
 		m_PlayerLog[playerLogIdx].sessinIdIndex = (uint16)sessionIdx;
-		m_PlayerLog[playerLogIdx].accountNo = accountInfo.AccountNo;
+		m_PlayerLog[playerLogIdx].accountNo = accountInfo->AccountNo;
 #endif
 
-		Send_RES_LOGIN(sessionID, true, accountInfo.AccountNo);
+		Send_RES_LOGIN(sessionID, true, accountInfo->AccountNo);
 
 #if defined(SESSION_LOG)
 		InterlockedIncrement64(&m_TotalLoginCnt);
@@ -643,28 +675,69 @@ void ChattingServer::Proc_REQ_SECTOR_MOVE(UINT64 sessionID, MSG_PACKET_CS_CHAT_R
 	memset(&m_PlayerLog[playerLogIdx], 0, sizeof(stPlayerLog));
 #endif
 
+	//AcquireSRWLockShared(&m_SessionAccountMapSrwLock);
+	//stAccoutInfo& accountInfo = m_SessionIdAccountMap[sessionID];
+	//ReleaseSRWLockShared(&m_SessionAccountMapSrwLock);
+	// => 참조 카운터 증가 (스마트 포인터)
 	AcquireSRWLockShared(&m_SessionAccountMapSrwLock);
-	stAccoutInfo& accountInfo = m_SessionIdAccountMap[sessionID];
+	std::shared_ptr<stAccoutInfo> accountInfo = m_SessionIdAccountMap[sessionID];
 	ReleaseSRWLockShared(&m_SessionAccountMapSrwLock);
-	//std::cout << "기존 X: " << accountInfo.X << ", Y: " << accountInfo.Y << std::endl;
-	if (accountInfo.X >= 0 && accountInfo.X <= dfSECTOR_X_MAX && accountInfo.Y >= 0 && accountInfo.X <= dfSECTOR_Y_MAX) {
-		AcquireSRWLockExclusive(&m_SectorSrwLock[accountInfo.Y][accountInfo.X]);
-		std::set<UINT64>& sector = m_SectorMap[accountInfo.Y][accountInfo.X];
-		sector.erase(sessionID);
-		ReleaseSRWLockExclusive(&m_SectorSrwLock[accountInfo.Y][accountInfo.X]);
-	}
-
+	
 	if (body.SectorX < 0 || body.SectorX > dfSECTOR_X_MAX || body.SectorY < 0 || body.SectorY > dfSECTOR_Y_MAX) {
 		// 범위 초과
 		DebugBreak();
 	}
 	else {
-		accountInfo.X = body.SectorX;
-		accountInfo.Y = body.SectorY;
-		m_SectorMap[accountInfo.Y][accountInfo.X].insert(sessionID);
+		// 실제 이동이 있는 경우만 섹터 변경
+		if (accountInfo->Y != body.SectorY || accountInfo->X != body.SectorX) {
+			if (accountInfo->X < 0 || accountInfo->X > dfSECTOR_X_MAX || accountInfo->Y < 0 || accountInfo->Y > dfSECTOR_Y_MAX) {
+				// 섹터에 포함되지 않은 상태(로그인 직후)
+				AcquireSRWLockExclusive(&m_SectorSrwLock[body.SectorY][body.SectorX]);
+				std::set<UINT64>& sector = m_SectorMap[body.SectorY][body.SectorX];
+				m_SectorMap[body.SectorY][body.SectorX].insert(sessionID);
+				ReleaseSRWLockExclusive(&m_SectorSrwLock[body.SectorY][body.SectorX]);
+			}
+			else {
+				// 잠금 순서 결정
+				USHORT eraseSectorLockLevel = accountInfo->X + accountInfo->Y * (dfSECTOR_X_MAX + 1);
+				USHORT insertSectorLockLevel = body.SectorX + body.SectorY * (dfSECTOR_X_MAX + 1);
+				if (eraseSectorLockLevel < insertSectorLockLevel) {
+					AcquireSRWLockExclusive(&m_SectorSrwLock[accountInfo->Y][accountInfo->X]);
+					AcquireSRWLockExclusive(&m_SectorSrwLock[body.SectorY][body.SectorX]);
+				}
+				else {
+					AcquireSRWLockExclusive(&m_SectorSrwLock[body.SectorY][body.SectorX]);
+					AcquireSRWLockExclusive(&m_SectorSrwLock[accountInfo->Y][accountInfo->X]);
+				}
+
+				// 기존 영역에서 삭제
+				if (m_SectorMap[accountInfo->Y][accountInfo->X].find(sessionID) == m_SectorMap[accountInfo->Y][accountInfo->X].end()) {
+					DebugBreak();
+				}
+				m_SectorMap[accountInfo->Y][accountInfo->X].erase(sessionID);
+
+				// 새로운 영역에 추가
+				if (m_SectorMap[body.SectorY][body.SectorX].find(sessionID) != m_SectorMap[body.SectorY][body.SectorX].end()) {
+					DebugBreak();
+				}
+				m_SectorMap[body.SectorY][body.SectorX].insert(sessionID);
+
+				if (eraseSectorLockLevel < insertSectorLockLevel) {
+					ReleaseSRWLockExclusive(&m_SectorSrwLock[body.SectorY][body.SectorX]);
+					ReleaseSRWLockExclusive(&m_SectorSrwLock[accountInfo->Y][accountInfo->X]);
+				}
+				else {
+					ReleaseSRWLockExclusive(&m_SectorSrwLock[accountInfo->Y][accountInfo->X]);
+					ReleaseSRWLockExclusive(&m_SectorSrwLock[body.SectorY][body.SectorX]);
+				}
+			}
+
+			accountInfo->X = body.SectorX;
+			accountInfo->Y = body.SectorY;
+		}
 	}
 
-	//std::cout << "신규 X: " << accountInfo.X << ", 신규 Y: " << accountInfo.Y << std::endl;
+	//std::cout << "신규 X: " << accountInfo->X << ", 신규 Y: " << accountInfo->Y << std::endl;
 
 #if defined(PLAYER_CREATE_RELEASE_LOG)
 	m_PlayerLog[playerLogIdx].joinFlag = false;
@@ -675,10 +748,10 @@ void ChattingServer::Proc_REQ_SECTOR_MOVE(UINT64 sessionID, MSG_PACKET_CS_CHAT_R
 	uint64 sessionIdx = sessionID;
 	//sessionIdx <<= 48;
 	m_PlayerLog[playerLogIdx].sessinIdIndex = (uint16)sessionIdx;
-	m_PlayerLog[playerLogIdx].accountNo = accountInfo.AccountNo;
+	m_PlayerLog[playerLogIdx].accountNo = accountInfo->AccountNo;
 #endif
 
-	Send_RES_SECTOR_MOVE(sessionID, accountInfo.AccountNo, accountInfo.X, accountInfo.Y);
+	Send_RES_SECTOR_MOVE(sessionID, accountInfo->AccountNo, accountInfo->X, accountInfo->Y);
 }
 
 void ChattingServer::Send_RES_SECTOR_MOVE(UINT64 sessionID, INT64 AccountNo, WORD SectorX, WORD SectorY)
@@ -745,8 +818,12 @@ void ChattingServer::Proc_REQ_MESSAGE(UINT64 sessionID, MSG_PACKET_CS_CHAT_REQ_M
 	hdr->len = sizeof(MSG_PACKET_CS_CHAT_RES_MESSAGE) + body.MessageLen;
 	hdr->randKey = (BYTE)rand();
 
+	//AcquireSRWLockShared(&m_SessionAccountMapSrwLock);
+	//stAccoutInfo& accountInfo = m_SessionIdAccountMap[sessionID];
+	//ReleaseSRWLockShared(&m_SessionAccountMapSrwLock);
+	// => 참조 카운터 증가 (스마트 포인터)
 	AcquireSRWLockShared(&m_SessionAccountMapSrwLock);
-	stAccoutInfo& accountInfo = m_SessionIdAccountMap[sessionID];
+	std::shared_ptr<stAccoutInfo> accountInfo = m_SessionIdAccountMap[sessionID];
 	ReleaseSRWLockShared(&m_SessionAccountMapSrwLock);
 
 #if defined(PLAYER_CREATE_RELEASE_LOG)
@@ -756,21 +833,24 @@ void ChattingServer::Proc_REQ_MESSAGE(UINT64 sessionID, MSG_PACKET_CS_CHAT_REQ_M
 	uint64 sessionIdx = sessionID;
 	//sessionIdx <<= 48;
 	m_PlayerLog[playerLogIdx].sessinIdIndex = (uint16)sessionIdx;
-	m_PlayerLog[playerLogIdx].accountNo = accountInfo.AccountNo;
+	m_PlayerLog[playerLogIdx].accountNo = accountInfo->AccountNo;
 #endif
 
 	(*sendMessage) << (WORD)en_PACKET_CS_CHAT_RES_MESSAGE;
-	(*sendMessage) << accountInfo.AccountNo;
-	(*sendMessage) << accountInfo.ID;
-	(*sendMessage) << accountInfo.Nickname;
+	(*sendMessage) << accountInfo->AccountNo;
+	(*sendMessage) << accountInfo->ID;
+	(*sendMessage) << accountInfo->Nickname;
 	(*sendMessage) << body.MessageLen;
 	sendMessage->Enqueue(message, body.MessageLen);
 
 	Encode(hdr->randKey, hdr->len, hdr->checkSum, sendMessage->GetBufferPtr(sizeof(stMSG_HDR)));
 	
-	bool ownMsgFlag = false;
-	for (int y = accountInfo.Y - 1; y <= accountInfo.Y + 1; y++) {
-		for (int x = accountInfo.X - 1; x <= accountInfo.X + 1; x++) {
+	// 메시지를 전달할 세션들을 중복 불가 셋에 삽입
+	std::set<UINT64> destinationSessions;
+
+	//bool ownMsgFlag = false;
+	for (int y = accountInfo->Y - 1; y <= accountInfo->Y + 1; y++) {
+		for (int x = accountInfo->X - 1; x <= accountInfo->X + 1; x++) {
 			if (y < 0 || y > dfSECTOR_Y_MAX || x < 0 || x > dfSECTOR_X_MAX) {
 				continue;
 			}
@@ -778,47 +858,48 @@ void ChattingServer::Proc_REQ_MESSAGE(UINT64 sessionID, MSG_PACKET_CS_CHAT_REQ_M
 			AcquireSRWLockShared(&m_SectorSrwLock[y][x]);
 			std::set<UINT64>& sector = m_SectorMap[y][x];
 			for (auto iter = sector.begin(); iter != sector.end(); iter++) {
-				// 예외 처리?
-				if (*iter == sessionID) {
-					ownMsgFlag = true;
-				}
 
-#if defined(PLAYER_CREATE_RELEASE_LOG)
-				USHORT logIdx = InterlockedIncrement16((short*)&m_PlayerLogIdx);
-				memset(&m_PlayerLog[logIdx], 0, sizeof(stPlayerLog));
-#endif
 
-				tlsMemPool.IncrementRefCnt(sendMessage, 1, to_string(sessionID) + ", Forwaring Chat Msg to " + to_string(*iter));
-				//std::cout << "[Proc_REQ_MESSAGE | SendPacekt] sessionID: " << *iter << std::endl;
-				if (!SendPacket(*iter, sendMessage)) {
-					m_SerialBuffPoolMgr.GetTlsMemPool().FreeMem(sendMessage, "FreeMem (SendPacket Fail, Forwaring Chat Mst)");
+//#if defined(PLAYER_CREATE_RELEASE_LOG)
+//				USHORT logIdx = InterlockedIncrement16((short*)&m_PlayerLogIdx);
+//				memset(&m_PlayerLog[logIdx], 0, sizeof(stPlayerLog));
+//#endif
+//
+//				tlsMemPool.IncrementRefCnt(sendMessage, 1, to_string(sessionID) + ", Forwaring Chat Msg to " + to_string(*iter));
+//				//std::cout << "[Proc_REQ_MESSAGE | SendPacekt] sessionID: " << *iter << std::endl;
+//				if (!SendPacket(*iter, sendMessage)) {
+//					m_SerialBuffPoolMgr.GetTlsMemPool().FreeMem(sendMessage, "FreeMem (SendPacket Fail, Forwaring Chat Mst)");
+//
+//#if defined(PLAYER_CREATE_RELEASE_LOG)
+//					m_PlayerLog[logIdx].sendSuccess = false;
+//#endif
+//				}
+//				else {
+//#if defined(PLAYER_CREATE_RELEASE_LOG)
+//					m_PlayerLog[logIdx].sendSuccess = true;
+//#endif
+//				}
 
-#if defined(PLAYER_CREATE_RELEASE_LOG)
-					m_PlayerLog[logIdx].sendSuccess = false;
-#endif
-				}
-				else {
-#if defined(PLAYER_CREATE_RELEASE_LOG)
-					m_PlayerLog[logIdx].sendSuccess = true;
-#endif
-				}
-#if defined(PLAYER_CREATE_RELEASE_LOG)
-				m_PlayerLog[logIdx].packetID = en_PACKET_CS_CHAT_RES_MESSAGE;
-				m_PlayerLog[logIdx].sessionID = sessionID;
-				uint64 sessionIdx = sessionID;
-				m_PlayerLog[logIdx].sessinIdIndex = (uint16)sessionIdx;
-				m_PlayerLog[logIdx].accountNo = accountInfo.AccountNo;
-				m_PlayerLog[logIdx].sessionID_dest = *iter;
-#endif
+				destinationSessions.insert(*iter);
+
+//#if defined(PLAYER_CREATE_RELEASE_LOG)
+//				m_PlayerLog[logIdx].packetID = en_PACKET_CS_CHAT_RES_MESSAGE;
+//				m_PlayerLog[logIdx].sessionID = sessionID;
+//				uint64 sessionIdx = sessionID;
+//				m_PlayerLog[logIdx].sessinIdIndex = (uint16)sessionIdx;
+//				m_PlayerLog[logIdx].accountNo = accountInfo->AccountNo;
+//				m_PlayerLog[logIdx].sessionID_dest = *iter;
+//#endif
 			}
 			ReleaseSRWLockShared(&m_SectorSrwLock[y][x]);
 		}
 	}
-	if (!ownMsgFlag) {
-#if defined(PLAYER_CREATE_RELEASE_LOG)
-		PlayerFileLog();
-		DebugBreak();
-#endif
+
+	for (auto destination : destinationSessions) {
+		tlsMemPool.IncrementRefCnt(sendMessage, 1, to_string(sessionID) + ", Forwaring Chat Msg to " + to_string(destination));
+		if (!SendPacket(destination, sendMessage)) {
+			m_SerialBuffPoolMgr.GetTlsMemPool().FreeMem(sendMessage, "FreeMem (SendPacket Fail, Forwaring Chat Mst)");
+		}
 	}
 
 	tlsMemPool.FreeMem(sendMessage, to_string(sessionID) + ", FreeMem (ChattingServer::Proc_REQ_MESSAGE)");
@@ -830,9 +911,14 @@ void ChattingServer::Proc_REQ_HEARTBEAT()
 
 void ChattingServer::Proc_SessionRelease(UINT64 sessionID)
 {
+	//AcquireSRWLockShared(&m_SessionAccountMapSrwLock);
+	//stAccoutInfo& accountInfo = m_SessionIdAccountMap[sessionID];
+	//ReleaseSRWLockShared(&m_SessionAccountMapSrwLock);
+	// => 참조 카운터 증가 (스마트 포인터)
 	AcquireSRWLockShared(&m_SessionAccountMapSrwLock);
-	stAccoutInfo& accountInfo = m_SessionIdAccountMap[sessionID];
+	std::shared_ptr<stAccoutInfo> accountInfo = m_SessionIdAccountMap[sessionID];
 	ReleaseSRWLockShared(&m_SessionAccountMapSrwLock);
+
 
 #if defined(PLAYER_CREATE_RELEASE_LOG)
 	stPlayerLog& playerLog = GetPlayerLog();
@@ -841,7 +927,7 @@ void ChattingServer::Proc_SessionRelease(UINT64 sessionID)
 	playerLog.packetID = en_SESSION_RELEASE;
 	playerLog.sessionID = sessionID;
 	playerLog.sessinIdIndex = (uint16)sessionID;
-	playerLog.accountNo = accountInfo.AccountNo;
+	playerLog.accountNo = accountInfo->AccountNo;
 #endif
 
 	// 세션 자료구조 정리
@@ -871,11 +957,13 @@ void ChattingServer::Proc_SessionRelease(UINT64 sessionID)
 	// account 및 섹터 자료구조 정리
 	//stAccoutInfo& accountInfo = m_SessionIdAccountMap[sessionID];
 
-	if (accountInfo.X >= 0 && accountInfo.X <= dfSECTOR_X_MAX && accountInfo.Y >= 0 && accountInfo.X <= dfSECTOR_Y_MAX) {
-		AcquireSRWLockExclusive(&m_SectorSrwLock[accountInfo.Y][accountInfo.X]);
-		std::set<UINT64>& sector = m_SectorMap[accountInfo.Y][accountInfo.X];
-		sector.erase(sessionID);
-		ReleaseSRWLockExclusive(&m_SectorSrwLock[accountInfo.Y][accountInfo.X]);
+	if (accountInfo->X >= 0 && accountInfo->X <= dfSECTOR_X_MAX && accountInfo->Y >= 0 && accountInfo->X <= dfSECTOR_Y_MAX) {
+		AcquireSRWLockExclusive(&m_SectorSrwLock[accountInfo->Y][accountInfo->X]);
+		if (m_SectorMap[accountInfo->Y][accountInfo->X].find(sessionID) == m_SectorMap[accountInfo->Y][accountInfo->X].end()) {
+			DebugBreak();
+		}
+		m_SectorMap[accountInfo->Y][accountInfo->X].erase(sessionID);
+		ReleaseSRWLockExclusive(&m_SectorSrwLock[accountInfo->Y][accountInfo->X]);
 	}
 
 	AcquireSRWLockExclusive(&m_SessionAccountMapSrwLock);

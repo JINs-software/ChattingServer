@@ -12,16 +12,16 @@ struct stAccoutInfo {
 
 	WORD X;
 	WORD Y;
+
+	stAccoutInfo() {
+		memset(this, 0, sizeof(stAccoutInfo));
+	}
 };
 
 // 스레드 이벤트
 struct stThreadEvent {
 	HANDLE recvEvent;
 	UINT64 sessionID;
-};
-
-struct stSessionMessageQ {
-
 };
 
 struct stRecvInfo {
