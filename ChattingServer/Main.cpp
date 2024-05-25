@@ -20,10 +20,12 @@ int main() {
 			if (ctr == 's' || ctr == 'S') {
 				break;
 			}
+#if defined(ALLOC_MEM_LOG)
 			else if (ctr == 'c' || ctr == 'C') {
 				chatserver.MemAllocLog();
 				DebugBreak();
 			}
+#endif
 			else if (ctr == 'd' || ctr == 'D') {
 				chatserver.SessionReleaseLog();
 				DebugBreak();

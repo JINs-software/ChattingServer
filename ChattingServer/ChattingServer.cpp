@@ -164,8 +164,12 @@ void ChattingServer::OnClientLeave(uint64 sessionID)
 		}
 	}
 
+#if defined(ALLOC_BY_TLS_MEM_POOL)
 	JBuffer* message = (JBuffer*)m_SerialBuffPoolMgr.GetTlsMemPool().AllocMem(1, to_string(sessionID) + ", OnClientLeave");
 	message->ClearBuffer();
+#else
+	JBuffer* message = new JBuffer();
+#endif
 	if(loginWaitSession) {
 		(*message) << (WORD)en_SESSION_RELEASE_BEFORE_LOGIN;
 	}
@@ -249,8 +253,12 @@ void ChattingServer::OnRecv(uint64 sessionID, JBuffer& recvBuff)
 			WORD type;
 			recvBuff.Peek(&type);
 
+#if defined(ALLOC_BY_TLS_MEM_POOL)
 			JBuffer* message = (JBuffer*)m_SerialBuffPoolMgr.GetTlsMemPool().AllocMem(1, to_string(sessionID) + ", OnRecv");
 			message->ClearBuffer();
+#else 
+			JBuffer* message = new JBuffer();
+#endif
 			switch (type)
 			{
 			case en_PACKET_CS_CHAT_REQ_LOGIN:
@@ -349,7 +357,9 @@ UINT __stdcall ChattingServer::ProcessThreadFunc(void* arg)
 {
 	ChattingServer* server = (ChattingServer*)arg;
 #if defined(ALLOC_BY_TLS_MEM_POOL)
-	server->m_SerialBuffPoolIdx = server->m_SerialBuffPoolMgr.AllocTlsMemPool();	// 생성자에서 설정한 Default 값을 따름
+	// 상위 서버 클래스에서 관리하는 메모리 풀 
+	server->m_SerialBuffPoolMgr.AllocTlsMemPool();	// 생성자에서 설정한 Default 값을 따름
+													// AllocTlsMemPool()로 부터 반환된 인덱스는 IOCP 작업자 스레드 도입부에서 CLanServer 멤버에 저장되었다 가정
 #endif
 
 	while (true) {
@@ -476,7 +486,13 @@ void ChattingServer::ProcessMessage(UINT64 sessionID, size_t msgCnt)
 			break;
 		}
 
+#if defined(ALLOC_BY_TLS_MEM_POOL)
 		m_SerialBuffPoolMgr.GetTlsMemPool().FreeMem(msg, to_string(sessionID) + ", FreeMem (ChattingServer::ProcessMessage)");
+#else
+		delete msg;
+#endif
+
+
 	}
 }
 
@@ -598,11 +614,12 @@ void ChattingServer::Send_RES_LOGIN(UINT64 sessionID, BYTE STATUS, INT64 Account
 	memset(&m_PlayerLog[playerLogIdx], 0, sizeof(stPlayerLog));
 #endif
 
-	//std::cout << "[Send_RES_LOGIN] sessionID: " << sessionID << ", accountNo: " << AccountNo << std::endl;
-	// Unicast Reply
+#if defined(ALLOC_BY_TLS_MEM_POOL)
 	JBuffer* sendMessage = m_SerialBuffPoolMgr.GetTlsMemPool().AllocMem(1, to_string(sessionID) + ", Send_RES_LOGIN");
 	sendMessage->ClearBuffer();
-	//m_SerialBuffPoolMgr.GetTlsMemPool().IncrementRefCnt(sendMessage);
+#else
+	std::shared_ptr<JBuffer> sendMessage = make_shared<JBuffer>();
+#endif
 
 	stMSG_HDR* hdr = sendMessage->DirectReserve<stMSG_HDR>();
 	hdr->code = dfPACKET_CODE;
@@ -613,8 +630,12 @@ void ChattingServer::Send_RES_LOGIN(UINT64 sessionID, BYTE STATUS, INT64 Account
 
 	Encode(hdr->randKey, hdr->len, hdr->checkSum, sendMessage->GetBufferPtr(sizeof(stMSG_HDR)));
 
+#if defined(ALLOC_BY_TLS_MEM_POOL)
 	if (!SendPacket(sessionID, sendMessage)) {
 		m_SerialBuffPoolMgr.GetTlsMemPool().FreeMem(sendMessage, "FreeMem (SendPacket Fail, Send_RES_LOGIN)");
+#else
+	if (!SendPacket(sessionID, sendMessage)) {
+#endif
 
 #if defined(PLAYER_CREATE_RELEASE_LOG)
 		m_PlayerLog[playerLogIdx].sendSuccess = false;
@@ -688,11 +709,13 @@ void ChattingServer::Send_RES_SECTOR_MOVE(UINT64 sessionID, INT64 AccountNo, WOR
 	memset(&m_PlayerLog[playerLogIdx], 0, sizeof(stPlayerLog));
 #endif
 
-	//std::cout << "[Send_RES_SECTOR_MOVE] sessionID: " << sessionID << ", accountNo: " << AccountNo << std::endl;
-	// Unicast Reply
+#if defined(ALLOC_BY_TLS_MEM_POOL)
 	JBuffer* sendMessage = m_SerialBuffPoolMgr.GetTlsMemPool().AllocMem(1, to_string(sessionID) + ", Send_RES_SECTOR_MOVE");
 	sendMessage->ClearBuffer();
-	//m_SerialBuffPoolMgr.GetTlsMemPool().IncrementRefCnt(sendPacket);
+#else
+	std::shared_ptr<JBuffer> sendMessage = make_shared<JBuffer>();
+#endif
+	
 
 	stMSG_HDR* hdr = sendMessage->DirectReserve<stMSG_HDR>();
 	hdr->code = dfPACKET_CODE;
@@ -703,9 +726,12 @@ void ChattingServer::Send_RES_SECTOR_MOVE(UINT64 sessionID, INT64 AccountNo, WOR
 
 	Encode(hdr->randKey, hdr->len, hdr->checkSum, sendMessage->GetBufferPtr(sizeof(stMSG_HDR)));
 
-	//SendPacket(sessionID, sendMessage);
+#if defined(ALLOC_BY_TLS_MEM_POOL)
 	if (!SendPacket(sessionID, sendMessage)) {
 		m_SerialBuffPoolMgr.GetTlsMemPool().FreeMem(sendMessage, "FreeMem (SendPacket Fail, Send_RES_SECTOR_MOVE)");
+#else
+	if (!SendPacket(sessionID, sendMessage)) {
+#endif
 
 #if defined(PLAYER_CREATE_RELEASE_LOG)
 		m_PlayerLog[playerLogIdx].sendSuccess = false;
@@ -734,9 +760,12 @@ void ChattingServer::Proc_REQ_MESSAGE(UINT64 sessionID, MSG_PACKET_CS_CHAT_REQ_M
 #endif
 
 
-	TlsMemPool<JBuffer>& tlsMemPool = m_SerialBuffPoolMgr.GetTlsMemPool();
-	JBuffer* sendMessage = tlsMemPool.AllocMem(1, to_string(sessionID) + ", Proc_REQ_MESSAGE");
+#if defined(ALLOC_BY_TLS_MEM_POOL)
+	JBuffer* sendMessage = m_SerialBuffPoolMgr.GetTlsMemPool().AllocMem(1, to_string(sessionID) + ", Proc_REQ_MESSAGE");
 	sendMessage->ClearBuffer();
+#else
+	std::shared_ptr<JBuffer> sendMessage = make_shared<JBuffer>();
+#endif
 
 	//tlsMemPool.IncrementRefCnt(sendMessage);		// 공유 전송 메시지
 
@@ -788,10 +817,15 @@ void ChattingServer::Proc_REQ_MESSAGE(UINT64 sessionID, MSG_PACKET_CS_CHAT_REQ_M
 				memset(&m_PlayerLog[logIdx], 0, sizeof(stPlayerLog));
 #endif
 
+#if defined(ALLOC_BY_TLS_MEM_POOL)
 				tlsMemPool.IncrementRefCnt(sendMessage, 1, to_string(sessionID) + ", Forwaring Chat Msg to " + to_string(*iter));
 				//std::cout << "[Proc_REQ_MESSAGE | SendPacekt] sessionID: " << *iter << std::endl;
 				if (!SendPacket(*iter, sendMessage)) {
 					m_SerialBuffPoolMgr.GetTlsMemPool().FreeMem(sendMessage, "FreeMem (SendPacket Fail, Forwaring Chat Mst)");
+#else
+				std::shared_ptr<JBuffer> sptr = sendMessage;
+				if(!SendPacket(*iter, sptr)) {
+#endif
 
 #if defined(PLAYER_CREATE_RELEASE_LOG)
 					m_PlayerLog[logIdx].sendSuccess = false;
@@ -814,14 +848,10 @@ void ChattingServer::Proc_REQ_MESSAGE(UINT64 sessionID, MSG_PACKET_CS_CHAT_REQ_M
 			ReleaseSRWLockShared(&m_SectorSrwLock[y][x]);
 		}
 	}
-	if (!ownMsgFlag) {
-#if defined(PLAYER_CREATE_RELEASE_LOG)
-		PlayerFileLog();
-		DebugBreak();
-#endif
-	}
-
+	
+#if defined(ALLOC_BY_TLS_MEM_POOL)
 	tlsMemPool.FreeMem(sendMessage, to_string(sessionID) + ", FreeMem (ChattingServer::Proc_REQ_MESSAGE)");
+#endif
 }
 
 void ChattingServer::Proc_REQ_HEARTBEAT()
@@ -861,7 +891,11 @@ void ChattingServer::Proc_SessionRelease(UINT64 sessionID)
 		while (!sessionMsgQ.empty()) {
 			JBuffer* msg = sessionMsgQ.front();
 			sessionMsgQ.pop();
+#if defined(ALLOC_BY_TLS_MEM_POOL)
 			m_SerialBuffPoolMgr.GetTlsMemPool().FreeMem(msg, to_string(sessionID) + ", FreeMem (ChattingServer::Proc_SessionRelease)");
+#else
+			delete msg;
+#endif
 		}
 		
 		m_SessionMessageQueueMap.erase(iter);
@@ -910,7 +944,9 @@ void ChattingServer::Proc_SessionReleaseBeforeLogin(UINT64 sessionID) {
 		while (!sessionMsgQ.empty()) {
 			JBuffer* msg = sessionMsgQ.front();
 			sessionMsgQ.pop();
+#if defined(ALLOC_BY_TLS_MEM_POOL)
 			m_SerialBuffPoolMgr.GetTlsMemPool().FreeMem(msg, to_string(sessionID) + ", FreeMem (ChattingServer::Proc_SessionRelease)");
+#endif
 		}
 
 		m_SessionMessageQueueMap.erase(iter);
