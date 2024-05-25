@@ -9,7 +9,7 @@
 #include <set>
 #include <unordered_map>
 
-#define PLAYER_CREATE_RELEASE_LOG
+//#define PLAYER_CREATE_RELEASE_LOG
 
 class ChattingServer : public CLanServer
 {
@@ -52,6 +52,7 @@ public:
 	void PlayerFileLog();
 #endif
 public:
+#if defined(ALLOC_BY_TLS_MEM_POOL)
 	ChattingServer(uint8 processThreadCnt, const char* serverIP, uint16 serverPort,
 		DWORD numOfIocpConcurrentThrd, uint16 numOfWorkerThreads, uint16 maxOfConnections,
 		size_t tlsMemPoolDefaultUnitCnt = CHAT_TLS_MEM_POOL_DEFAULT_UNIT_CNT, size_t tlsMemPoolDefaultCapacity = CHAT_TLS_MEM_POOL_DEFAULT_UNIT_CAPACITY,
@@ -65,6 +66,19 @@ public:
 		m_WorkerThreadCnt(0),
 		m_LimitAcceptance(maxOfConnections),
 		m_ProcessThreadCnt(processThreadCnt)
+#else
+	ChattingServer(uint8 processThreadCnt, const char* serverIP, uint16 serverPort,
+		DWORD numOfIocpConcurrentThrd, uint16 numOfWorkerThreads, uint16 maxOfConnections,
+		uint32 sessionSendBuffSize = CHAT_SERV_SESSION_SEND_BUFF_SIZE, uint32 sessionRecvBuffSize = CHAT_SERV_SESSION_RECV_BUFF_SIZE,
+		bool beNagle = true
+	)
+		: CLanServer(serverIP, serverPort, numOfIocpConcurrentThrd, numOfWorkerThreads, maxOfConnections, true, false,
+			sessionSendBuffSize, sessionRecvBuffSize
+		),
+		m_WorkerThreadCnt(0),
+		m_LimitAcceptance(maxOfConnections),
+		m_ProcessThreadCnt(processThreadCnt)
+#endif
 	{
 		m_ProcessThreadHnds.resize(m_ProcessThreadCnt);
 		m_ProcessStopEvent = CreateEvent(NULL, true, false, NULL);
@@ -158,9 +172,12 @@ private:
 	////////////////////////////////////////////
 	// Account 정보 관리
 	////////////////////////////////////////////
-	//std::unordered_map<UINT64, stAccoutInfo>				m_SessionIdAccountMap;
+#if defined(SINGLE_UPDATE_THREAD)
+	std::unordered_map<UINT64, stAccoutInfo>				m_SessionIdAccountMap;
+#else
 	// => stAccoutInfo에 대한 레퍼런스 카운팅 필요
 	std::unordered_map<UINT64, std::shared_ptr<stAccoutInfo>>	m_SessionIdAccountMap;
+#endif
 	
 	
 	// SRWLOCK 동기화 객체

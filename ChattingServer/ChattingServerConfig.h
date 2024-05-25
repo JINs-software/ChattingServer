@@ -19,7 +19,10 @@
 ///////////////////////////////////////////////////////////////
 // ChattingServer
 ///////////////////////////////////////////////////////////////
-#define MAX_PROCESS_THREAD_CNT				4
+#define SINGLE_UPDATE_THREAD
+#if !defined(SINGLE_UPDATE_THREAD)
+#define MAX_PROCESS_THREAD_CNT				1
+#endif
 
 // AccountInfo 메모리 풀 설정
 // (size_t defaultMemPoolUnitCnt, size_t defaultMemPoolCapcity, bool refCntMemPool = false, bool placementNewMemPool = false);

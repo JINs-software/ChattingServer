@@ -8,7 +8,12 @@ int main() {
 	//	UINT16 maxOfConnections, bool beNagle = true,
 	//	UINT32 sessionSendBuffSize = CHAT_SERV_SESSION_SEND_BUFF_SIZE, UINT32 sessionRecvBuffSize = CHAT_SERV_SESSION_RECV_BUFF_SIZE
 	//)
-	ChattingServer chatserver(MAX_PROCESS_THREAD_CNT, NULL, 12001, 0, 4, CHAT_SERV_LIMIT_ACCEPTANCE);
+
+#if defined(SINGLE_UPDATE_THREAD)
+	ChattingServer chatserver(1, NULL, 12001, 0, 1, CHAT_SERV_LIMIT_ACCEPTANCE);
+#else
+	ChattingServer chatserver(MAX_PROCESS_THREAD_CNT, NULL, 12001, 0, 1, CHAT_SERV_LIMIT_ACCEPTANCE);
+#endif
 
 	chatserver.Start();
 
@@ -20,10 +25,12 @@ int main() {
 			if (ctr == 's' || ctr == 'S') {
 				break;
 			}
+#if defined(ALLOC_MEM_LOG)
 			else if (ctr == 'c' || ctr == 'C') {
 				chatserver.MemAllocLog();
 				DebugBreak();
 			}
+#endif
 			else if (ctr == 'd' || ctr == 'D') {
 				chatserver.SessionReleaseLog();
 				DebugBreak();

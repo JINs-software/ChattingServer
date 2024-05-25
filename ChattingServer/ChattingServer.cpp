@@ -170,8 +170,12 @@ void ChattingServer::OnClientLeave(uint64 sessionID)
 		}
 	}
 
+#if defined(ALLOC_BY_TLS_MEM_POOL)
 	JBuffer* message = (JBuffer*)m_SerialBuffPoolMgr.GetTlsMemPool().AllocMem(1, to_string(sessionID) + ", OnClientLeave");
 	message->ClearBuffer();
+#else
+	JBuffer* message = new JBuffer();
+#endif
 	if(loginWaitSession) {
 		(*message) << (WORD)en_SESSION_RELEASE_BEFORE_LOGIN;
 	}
@@ -187,7 +191,9 @@ void ChattingServer::OnClientLeave(uint64 sessionID)
 	auto msgQueueLockIter = m_SessionMessageQueueLockMap.find(sessionID);
 	if (msgQueueIter == m_SessionMessageQueueMap.end() || msgQueueLockIter == m_SessionMessageQueueLockMap.end()) {
 		SessionReleaseLog();
+#if defined(PLAYER_CREATE_RELEASE_LOG)
 		PlayerFileLog();
+#endif
 		DebugBreak();
 	}
 	std::queue<JBuffer*>& sessionMsgQ = msgQueueIter->second;
@@ -240,7 +246,8 @@ void ChattingServer::OnRecv(uint64 sessionID, JBuffer& recvBuff)
 		}
 		if (recvBuff.GetUseSize() < sizeof(stMSG_HDR) + msgHdr.len) {
 			// 메시지 미완성
-			DebugBreak();
+			//DebugBreak();
+			// => 메모리 풀 방식에서 스마트 포인터 방식 변경 시 미환성 메시지 수신 발생..
 			break;
 		}
 
@@ -255,8 +262,12 @@ void ChattingServer::OnRecv(uint64 sessionID, JBuffer& recvBuff)
 			WORD type;
 			recvBuff.Peek(&type);
 
+#if defined(ALLOC_BY_TLS_MEM_POOL)
 			JBuffer* message = (JBuffer*)m_SerialBuffPoolMgr.GetTlsMemPool().AllocMem(1, to_string(sessionID) + ", OnRecv");
 			message->ClearBuffer();
+#else 
+			JBuffer* message = new JBuffer();
+#endif
 			switch (type)
 			{
 			case en_PACKET_CS_CHAT_REQ_LOGIN:
@@ -302,7 +313,9 @@ void ChattingServer::OnRecv(uint64 sessionID, JBuffer& recvBuff)
 				auto msgQueueLockIter = m_SessionMessageQueueLockMap.find(sessionID);
 				if (msgQueueIter == m_SessionMessageQueueMap.end() || msgQueueLockIter == m_SessionMessageQueueLockMap.end()) {
 					SessionReleaseLog();
+#if defined(PLAYER_CREATE_RELEASE_LOG)
 					PlayerFileLog();
+#endif
 					DebugBreak();
 				}
 				std::queue<JBuffer*>& sessionMsgQ = msgQueueIter->second;
@@ -316,6 +329,7 @@ void ChattingServer::OnRecv(uint64 sessionID, JBuffer& recvBuff)
 				recvInfo.recvMsgCnt++;
 			}
 			else {
+				//m_SerialBuffPoolMgr.GetTlsMemPool().FreeMem(message, to_string(sessionID) + ", FreeMem (ChattingServer::OnRecv)");
 				DebugBreak();
 			}
 
@@ -440,7 +454,9 @@ void ChattingServer::ProcessMessage(UINT64 sessionID, size_t msgCnt)
 	if (msgQueueIter == m_SessionMessageQueueMap.end() || msgQueueLockIter == m_SessionMessageQueueLockMap.end()) {
 		// 세션 삭제 메시지가 먼저 큐에 들어옴 -> 세션 관련 자료구조 삭제
 		SessionReleaseLog();
+#if defined(PLAYER_CREATE_RELEASE_LOG)
 		PlayerFileLog();
+#endif
 		DebugBreak();
 		return;
 	}
@@ -512,7 +528,11 @@ void ChattingServer::ProcessMessage(UINT64 sessionID, size_t msgCnt)
 			break;
 		}
 
+#if defined(ALLOC_BY_TLS_MEM_POOL)
 		m_SerialBuffPoolMgr.GetTlsMemPool().FreeMem(msg, to_string(sessionID) + ", FreeMem (ChattingServer::ProcessMessage)");
+#else
+		delete msg;
+#endif
 
 		LeaveCriticalSection(sessionMsgQLock);
 	}
@@ -605,20 +625,21 @@ void ChattingServer::Proc_REQ_LOGIN(UINT64 sessionID, MSG_PACKET_CS_CHAT_REQ_LOG
 	}
 
 	if (!releaseBeforeLogin) {
-
-		//stAccoutInfo accountInfo;
-		//memcpy(&accountInfo, &body.AccountNo, sizeof(stAccoutInfo));
-		//accountInfo.X = -1;
-		//AcquireSRWLockExclusive(&m_SessionAccountMapSrwLock);
-		//m_SessionIdAccountMap.insert({ sessionID, accountInfo });
-		//ReleaseSRWLockExclusive(&m_SessionAccountMapSrwLock);
-
+#if defined(SINGLE_UPDATE_THREAD)
+		stAccoutInfo accountInfo;
+		memcpy(&accountInfo, &body.AccountNo, sizeof(stAccoutInfo));
+		accountInfo.X = -1;
+		AcquireSRWLockExclusive(&m_SessionAccountMapSrwLock);
+		m_SessionIdAccountMap.insert({ sessionID, accountInfo });
+		ReleaseSRWLockExclusive(&m_SessionAccountMapSrwLock);
+#else
 		std::shared_ptr<stAccoutInfo> accountInfo = std::make_shared<stAccoutInfo>();
 		accountInfo->AccountNo = body.AccountNo;
 		accountInfo->X = -1;
 		AcquireSRWLockExclusive(&m_SessionAccountMapSrwLock);
 		m_SessionIdAccountMap.insert({ sessionID, accountInfo });
 		ReleaseSRWLockExclusive(&m_SessionAccountMapSrwLock);
+#endif
 
 #if defined(PLAYER_CREATE_RELEASE_LOG)
 		m_PlayerLog[playerLogIdx].packetID = en_PACKET_CS_CHAT_REQ_LOGIN;
@@ -628,7 +649,11 @@ void ChattingServer::Proc_REQ_LOGIN(UINT64 sessionID, MSG_PACKET_CS_CHAT_REQ_LOG
 		m_PlayerLog[playerLogIdx].accountNo = accountInfo->AccountNo;
 #endif
 
+#if defined(SINGLE_UPDATE_THREAD)
+		Send_RES_LOGIN(sessionID, true, accountInfo.AccountNo);
+#else
 		Send_RES_LOGIN(sessionID, true, accountInfo->AccountNo);
+#endif
 
 #if defined(SESSION_LOG)
 		InterlockedIncrement64(&m_TotalLoginCnt);
@@ -643,11 +668,12 @@ void ChattingServer::Send_RES_LOGIN(UINT64 sessionID, BYTE STATUS, INT64 Account
 	memset(&m_PlayerLog[playerLogIdx], 0, sizeof(stPlayerLog));
 #endif
 
-	//std::cout << "[Send_RES_LOGIN] sessionID: " << sessionID << ", accountNo: " << AccountNo << std::endl;
-	// Unicast Reply
+#if defined(ALLOC_BY_TLS_MEM_POOL)
 	JBuffer* sendMessage = m_SerialBuffPoolMgr.GetTlsMemPool().AllocMem(1, to_string(sessionID) + ", Send_RES_LOGIN");
 	sendMessage->ClearBuffer();
-	//m_SerialBuffPoolMgr.GetTlsMemPool().IncrementRefCnt(sendMessage);
+#else
+	std::shared_ptr<JBuffer> sendMessage = make_shared<JBuffer>();
+#endif
 
 	stMSG_HDR* hdr = sendMessage->DirectReserve<stMSG_HDR>();
 	hdr->code = dfPACKET_CODE;
@@ -658,8 +684,12 @@ void ChattingServer::Send_RES_LOGIN(UINT64 sessionID, BYTE STATUS, INT64 Account
 
 	Encode(hdr->randKey, hdr->len, hdr->checkSum, sendMessage->GetBufferPtr(sizeof(stMSG_HDR)));
 
+#if defined(ALLOC_BY_TLS_MEM_POOL)
 	if (!SendPacket(sessionID, sendMessage)) {
 		m_SerialBuffPoolMgr.GetTlsMemPool().FreeMem(sendMessage, "FreeMem (SendPacket Fail, Send_RES_LOGIN)");
+#else
+	if (!SendPacket(sessionID, sendMessage)) {
+#endif
 
 #if defined(PLAYER_CREATE_RELEASE_LOG)
 		m_PlayerLog[playerLogIdx].sendSuccess = false;
@@ -688,14 +718,17 @@ void ChattingServer::Proc_REQ_SECTOR_MOVE(UINT64 sessionID, MSG_PACKET_CS_CHAT_R
 	memset(&m_PlayerLog[playerLogIdx], 0, sizeof(stPlayerLog));
 #endif
 
-	//AcquireSRWLockShared(&m_SessionAccountMapSrwLock);
-	//stAccoutInfo& accountInfo = m_SessionIdAccountMap[sessionID];
-	//ReleaseSRWLockShared(&m_SessionAccountMapSrwLock);
+#if defined(SINGLE_UPDATE_THREAD)
+	AcquireSRWLockShared(&m_SessionAccountMapSrwLock);
+	stAccoutInfo* accountInfo = &m_SessionIdAccountMap[sessionID];
+	ReleaseSRWLockShared(&m_SessionAccountMapSrwLock);
+#else
 	// => 참조 카운터 증가 (스마트 포인터)
 	AcquireSRWLockShared(&m_SessionAccountMapSrwLock);
 	std::shared_ptr<stAccoutInfo> accountInfo = m_SessionIdAccountMap[sessionID];
 	ReleaseSRWLockShared(&m_SessionAccountMapSrwLock);
-	
+#endif
+
 	if (body.SectorX < 0 || body.SectorX > dfSECTOR_X_MAX || body.SectorY < 0 || body.SectorY > dfSECTOR_Y_MAX) {
 		// 범위 초과
 		DebugBreak();
@@ -774,11 +807,13 @@ void ChattingServer::Send_RES_SECTOR_MOVE(UINT64 sessionID, INT64 AccountNo, WOR
 	memset(&m_PlayerLog[playerLogIdx], 0, sizeof(stPlayerLog));
 #endif
 
-	//std::cout << "[Send_RES_SECTOR_MOVE] sessionID: " << sessionID << ", accountNo: " << AccountNo << std::endl;
-	// Unicast Reply
+#if defined(ALLOC_BY_TLS_MEM_POOL)
 	JBuffer* sendMessage = m_SerialBuffPoolMgr.GetTlsMemPool().AllocMem(1, to_string(sessionID) + ", Send_RES_SECTOR_MOVE");
 	sendMessage->ClearBuffer();
-	//m_SerialBuffPoolMgr.GetTlsMemPool().IncrementRefCnt(sendPacket);
+#else
+	std::shared_ptr<JBuffer> sendMessage = make_shared<JBuffer>();
+#endif
+	
 
 	stMSG_HDR* hdr = sendMessage->DirectReserve<stMSG_HDR>();
 	hdr->code = dfPACKET_CODE;
@@ -789,9 +824,12 @@ void ChattingServer::Send_RES_SECTOR_MOVE(UINT64 sessionID, INT64 AccountNo, WOR
 
 	Encode(hdr->randKey, hdr->len, hdr->checkSum, sendMessage->GetBufferPtr(sizeof(stMSG_HDR)));
 
-	//SendPacket(sessionID, sendMessage);
+#if defined(ALLOC_BY_TLS_MEM_POOL)
 	if (!SendPacket(sessionID, sendMessage)) {
 		m_SerialBuffPoolMgr.GetTlsMemPool().FreeMem(sendMessage, "FreeMem (SendPacket Fail, Send_RES_SECTOR_MOVE)");
+#else
+	if (!SendPacket(sessionID, sendMessage)) {
+#endif
 
 #if defined(PLAYER_CREATE_RELEASE_LOG)
 		m_PlayerLog[playerLogIdx].sendSuccess = false;
@@ -820,9 +858,13 @@ void ChattingServer::Proc_REQ_MESSAGE(UINT64 sessionID, MSG_PACKET_CS_CHAT_REQ_M
 #endif
 
 
-	TlsMemPool<JBuffer>& tlsMemPool = m_SerialBuffPoolMgr.GetTlsMemPool();
-	JBuffer* sendMessage = tlsMemPool.AllocMem(1, to_string(sessionID) + ", Proc_REQ_MESSAGE");
+#if defined(ALLOC_BY_TLS_MEM_POOL)
+	JBuffer* sendMessage = m_SerialBuffPoolMgr.GetTlsMemPool().AllocMem(1, to_string(sessionID) + ", Proc_REQ_MESSAGE");
 	sendMessage->ClearBuffer();
+#else
+	std::shared_ptr<JBuffer> sendMessage = make_shared<JBuffer>();
+#endif
+
 
 	//tlsMemPool.IncrementRefCnt(sendMessage);		// 공유 전송 메시지
 
@@ -836,7 +878,11 @@ void ChattingServer::Proc_REQ_MESSAGE(UINT64 sessionID, MSG_PACKET_CS_CHAT_REQ_M
 	//ReleaseSRWLockShared(&m_SessionAccountMapSrwLock);
 	// => 참조 카운터 증가 (스마트 포인터)
 	AcquireSRWLockShared(&m_SessionAccountMapSrwLock);
+#if defined(SINGLE_UPDATE_THREAD)
+	stAccoutInfo* accountInfo = &m_SessionIdAccountMap[sessionID];
+#else
 	std::shared_ptr<stAccoutInfo> accountInfo = m_SessionIdAccountMap[sessionID];
+#endif
 	ReleaseSRWLockShared(&m_SessionAccountMapSrwLock);
 
 #if defined(PLAYER_CREATE_RELEASE_LOG)
@@ -912,14 +958,21 @@ void ChattingServer::Proc_REQ_MESSAGE(UINT64 sessionID, MSG_PACKET_CS_CHAT_REQ_M
 		}
 	}
 
+#if defined(ALLOC_BY_TLS_MEM_POOL)
 	for (auto destination : destinationSessions) {
-		tlsMemPool.IncrementRefCnt(sendMessage, 1, to_string(sessionID) + ", Forwaring Chat Msg to " + to_string(destination));
+		m_SerialBuffPoolMgr.GetTlsMemPool().IncrementRefCnt(sendMessage, 1, to_string(sessionID) + ", Forwaring Chat Msg to " + to_string(destination));
 		if (!SendPacket(destination, sendMessage)) {
 			m_SerialBuffPoolMgr.GetTlsMemPool().FreeMem(sendMessage, "FreeMem (SendPacket Fail, Forwaring Chat Mst)");
 		}
 	}
 
-	tlsMemPool.FreeMem(sendMessage, to_string(sessionID) + ", FreeMem (ChattingServer::Proc_REQ_MESSAGE)");
+	m_SerialBuffPoolMgr.GetTlsMemPool().FreeMem(sendMessage, to_string(sessionID) + ", FreeMem (ChattingServer::Proc_REQ_MESSAGE)");
+#else
+	for (auto destination : destinationSessions) {
+		std::shared_ptr<JBuffer> sptr = sendMessage;
+		SendPacket(destination, sptr);
+	}
+#endif
 }
 
 void ChattingServer::Proc_REQ_HEARTBEAT()
@@ -933,7 +986,11 @@ void ChattingServer::Proc_SessionRelease(UINT64 sessionID)
 	//ReleaseSRWLockShared(&m_SessionAccountMapSrwLock);
 	// => 참조 카운터 증가 (스마트 포인터)
 	AcquireSRWLockShared(&m_SessionAccountMapSrwLock);
+#if defined(SINGLE_UPDATE_THREAD)
+	stAccoutInfo* accountInfo = &m_SessionIdAccountMap[sessionID];
+#else
 	std::shared_ptr<stAccoutInfo> accountInfo = m_SessionIdAccountMap[sessionID];
+#endif
 	ReleaseSRWLockShared(&m_SessionAccountMapSrwLock);
 
 
@@ -964,7 +1021,11 @@ void ChattingServer::Proc_SessionRelease(UINT64 sessionID)
 		while (!sessionMsgQ.empty()) {
 			JBuffer* msg = sessionMsgQ.front();
 			sessionMsgQ.pop();
+#if defined(ALLOC_BY_TLS_MEM_POOL)
 			m_SerialBuffPoolMgr.GetTlsMemPool().FreeMem(msg, to_string(sessionID) + ", FreeMem (ChattingServer::Proc_SessionRelease)");
+#else
+			delete msg;
+#endif
 		}
 		
 		m_SessionMessageQueueMap.erase(iter);
@@ -1015,7 +1076,11 @@ void ChattingServer::Proc_SessionReleaseBeforeLogin(UINT64 sessionID) {
 		while (!sessionMsgQ.empty()) {
 			JBuffer* msg = sessionMsgQ.front();
 			sessionMsgQ.pop();
+#if defined(ALLOC_BY_TLS_MEM_POOL)
 			m_SerialBuffPoolMgr.GetTlsMemPool().FreeMem(msg, to_string(sessionID) + ", FreeMem (ChattingServer::Proc_SessionRelease)");
+#else
+			delete msg;
+#endif
 		}
 
 		m_SessionMessageQueueMap.erase(iter);
