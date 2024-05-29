@@ -1,7 +1,7 @@
 #pragma once
 
 #include "CLanServer.h"
-#include "CommonProtocol.h"
+#include "ChattingProtocol.h"
 #include "ChattingServerConfig.h"
 #include "DataStruct.h"
 
@@ -188,8 +188,9 @@ private:
 	static UINT __stdcall ProcessThreadFunc(void* arg);
 	void ProcessMessage(UINT64 sessionID, size_t msgCnt);
 
-	bool Decode(BYTE randKey, USHORT payloadLen, BYTE checkSum, BYTE* payloads);
-	void Encode(BYTE randKey, USHORT payloadLen, BYTE& checkSum, BYTE* payloads);
+	//bool Decode(BYTE randKey, USHORT payloadLen, BYTE checkSum, BYTE* payloads);
+	//void Encode(BYTE randKey, USHORT payloadLen, BYTE& checkSum, BYTE* payloads);
+	//=> 라이브러리 단에서 수행
 
 	void Proc_REQ_LOGIN(UINT64 sessionID, MSG_PACKET_CS_CHAT_REQ_LOGIN& body);
 	void Send_RES_LOGIN(UINT64 sessionID, BYTE STATUS, INT64 AccountNo);

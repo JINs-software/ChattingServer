@@ -138,7 +138,7 @@
   <ItemGroup>
     <ClInclude Include="ChattingServer.h" />
     <ClInclude Include="ChattingServerConfig.h" />
-    <ClInclude Include="CommonProtocol.h" />
+    <ClInclude Include="ChattingProtocol.h" />
     <ClInclude Include="DataStruct.h" />
   </ItemGroup>
   <ItemGroup>

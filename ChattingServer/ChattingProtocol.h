@@ -1,13 +1,6 @@
-//#ifndef __GODDAMNBUG_ONLINE_PROTOCOL__
-//#define __GODDAMNBUG_ONLINE_PROTOCOL__
+#pragma once
 
 #include <minwindef.h>
-
-#define dfPACKET_CODE		0x77
-#define dfPACKET_KEY		0x32
-
-#define dfSECTOR_X_MAX		50
-#define dfSECTOR_Y_MAX		50
 
 enum en_PACKET_TYPE
 {
@@ -129,14 +122,6 @@ enum en_PACKET_TYPE
 //#endif
 
 #pragma pack(push, 1)
-
-struct stMSG_HDR {
-	BYTE	code;
-	USHORT	len;
-	BYTE	randKey;
-	BYTE	checkSum;
-};
-
 struct MSG_PACKET_CS_CHAT_REQ_LOGIN {
 	WORD Type;
 	INT64 AccountNo;

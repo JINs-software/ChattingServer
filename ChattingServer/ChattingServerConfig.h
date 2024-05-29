@@ -13,5 +13,7 @@
 
 #define MAX_WORKER_THREAD_CNT				32
 
+#define dfSECTOR_X_MAX		50
+#define dfSECTOR_Y_MAX		50
 
 //#define ENCODE_TEST

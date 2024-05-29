@@ -165,8 +165,9 @@ void ChattingServer::OnClientLeave(uint64 sessionID)
 	}
 
 #if defined(ALLOC_BY_TLS_MEM_POOL)
-	JBuffer* message = (JBuffer*)m_SerialBuffPoolMgr.GetTlsMemPool().AllocMem(1, to_string(sessionID) + ", OnClientLeave");
-	message->ClearBuffer();
+	//JBuffer* message = (JBuffer*)m_SerialBuffPoolMgr.GetTlsMemPool().AllocMem(1, to_string(sessionID) + ", OnClientLeave");
+	//message->ClearBuffer();
+	JBuffer* message = AllocSerialBuff();
 #else
 	JBuffer* message = new JBuffer();
 #endif
@@ -218,134 +219,91 @@ void ChattingServer::OnRecv(uint64 sessionID, JBuffer& recvBuff)
 	playerLog.sessinIdIndex = (uint16)sessionID;
 #endif
 
-	HANDLE thHnd = GetCurrentThread();
-
-	// [메시지 수신]	
-	// (임시) 컨텐츠 단에서 Code 부터 인/디코딩까지 수행
-	while (recvBuff.GetUseSize() >= sizeof(stMSG_HDR)) {
-
-		stRecvInfo recvInfo;
-		recvInfo.sessionID = sessionID;
-		recvInfo.recvMsgCnt = 0;
-
-		stMSG_HDR msgHdr;
-		recvBuff.Peek(&msgHdr);
-		if (msgHdr.code != dfPACKET_CODE) {
-			// 코드 불일치
-			// 연결 강제 종료!
-			DebugBreak();
-			break;
-		}
-		if (recvBuff.GetUseSize() < sizeof(stMSG_HDR) + msgHdr.len) {
-			// 메시지 미완성
-			DebugBreak();
-			break;
-		}
-
-		recvBuff >> msgHdr;
-		if (!Decode(msgHdr.randKey, msgHdr.len, msgHdr.checkSum, recvBuff.GetDequeueBufferPtr())) {
-			DebugBreak();
-			// 연결 강제 종료?
-		}
-
-		UINT dequeueSize = 0;
-		while (recvBuff.GetUseSize() > 0) {			/// ????		// [TO DO] msgHdr.len까지만 디큐잉 하는 것으로 변경
-			WORD type;
-			recvBuff.Peek(&type);
+	stRecvInfo recvInfo;
+	recvInfo.sessionID = sessionID;
+	recvInfo.recvMsgCnt = 0;
+	while (recvBuff.GetUseSize() > 0) {			/// ????		// [TO DO] msgHdr.len까지만 디큐잉 하는 것으로 변경
+		WORD type;
+		recvBuff.Peek(&type);
 
 #if defined(ALLOC_BY_TLS_MEM_POOL)
-			JBuffer* message = (JBuffer*)m_SerialBuffPoolMgr.GetTlsMemPool().AllocMem(1, to_string(sessionID) + ", OnRecv");
-			message->ClearBuffer();
+		//JBuffer* message = (JBuffer*)m_SerialBuffPoolMgr.GetTlsMemPool().AllocMem(1, to_string(sessionID) + ", OnRecv");
+		JBuffer* message = AllocSerialBuff();
+		if (message == NULL) {
+			DebugBreak();
+		}
+		//message->ClearBuffer();
 #else 
-			JBuffer* message = new JBuffer();
+		JBuffer* message = new JBuffer();
 #endif
-			switch (type)
-			{
-			case en_PACKET_CS_CHAT_REQ_LOGIN:
-			{
-				recvBuff.Dequeue(message->GetDequeueBufferPtr(), sizeof(MSG_PACKET_CS_CHAT_REQ_LOGIN));
-				message->DirectMoveEnqueueOffset(sizeof(MSG_PACKET_CS_CHAT_REQ_LOGIN));
-				dequeueSize += sizeof(MSG_PACKET_CS_CHAT_REQ_LOGIN);
-			}
-				break;
-			case en_PACKET_CS_CHAT_REQ_SECTOR_MOVE:
-			{
-				recvBuff.Dequeue(message->GetDequeueBufferPtr(), sizeof(MSG_PACKET_CS_CHAT_REQ_SECTOR_MOVE));
-				message->DirectMoveEnqueueOffset(sizeof(MSG_PACKET_CS_CHAT_REQ_SECTOR_MOVE));
-				dequeueSize += sizeof(MSG_PACKET_CS_CHAT_REQ_SECTOR_MOVE);
-			}
-				break;
-			case en_PACKET_CS_CHAT_REQ_MESSAGE:
-			{
-				WORD messageLen;
-				recvBuff.Peek(sizeof(WORD) + sizeof(INT64), (BYTE*)&messageLen, sizeof(WORD));
-				recvBuff.Dequeue(message->GetDequeueBufferPtr(), sizeof(MSG_PACKET_CS_CHAT_REQ_MESSAGE) + messageLen);
-				message->DirectMoveEnqueueOffset(sizeof(MSG_PACKET_CS_CHAT_REQ_MESSAGE) + messageLen);
-				dequeueSize += sizeof(MSG_PACKET_CS_CHAT_REQ_MESSAGE) + messageLen;
-			}
-				break;
-			case en_PACKET_CS_CHAT_REQ_HEARTBEAT:
-			{
-				DebugBreak();
-			}
-				break;
-			default:
-				DebugBreak();
-				break;
-			}
-			
-			if (message != NULL) {
-				// .. 세션 별 메시지 큐 삽입
-				// 메시지 큐 & 메시지 큐 동기화 객체 GET
-				AcquireSRWLockShared(&m_SessionMessageqMapSrwLock);
-				//std::queue<JBuffer*>& sessionMsgQ = m_SessionMessageQueueMap[sessionID];
-				//CRITICAL_SECTION* lockPtr = m_SessionMessageQueueLockMap[sessionID];		// 임시 동기화 객체
-				auto msgQueueIter = m_SessionMessageQueueMap.find(sessionID);
-				auto msgQueueLockIter = m_SessionMessageQueueLockMap.find(sessionID);
-				if (msgQueueIter == m_SessionMessageQueueMap.end() || msgQueueLockIter == m_SessionMessageQueueLockMap.end()) {
-					SessionReleaseLog();
-					PlayerFileLog();
-					DebugBreak();
-				}
-				std::queue<JBuffer*>& sessionMsgQ = msgQueueIter->second;
-				CRITICAL_SECTION* lockPtr = msgQueueLockIter->second;
-				ReleaseSRWLockShared(&m_SessionMessageqMapSrwLock);
-
-				EnterCriticalSection(lockPtr);								// 임시 동기화 객체
-				sessionMsgQ.push(message);
-				LeaveCriticalSection(lockPtr);								// 임시 동기화 객체
-
-				recvInfo.recvMsgCnt++;
-			}
-			else {
-				DebugBreak();
-			}
-
-			if (dequeueSize == msgHdr.len) {
-				break;
-			}
-			else if (dequeueSize > msgHdr.len) {
-				DebugBreak();
-			}
+		switch (type)
+		{
+		case en_PACKET_CS_CHAT_REQ_LOGIN:
+		{
+			recvBuff.Dequeue(message->GetDequeueBufferPtr(), sizeof(MSG_PACKET_CS_CHAT_REQ_LOGIN));
+			message->DirectMoveEnqueueOffset(sizeof(MSG_PACKET_CS_CHAT_REQ_LOGIN));
 		}
-
-		if (recvInfo.recvMsgCnt > 0) {
-#if defined(PLAYER_CREATE_RELEASE_LOG)
-			playerLog.uint0 = recvInfo.recvMsgCnt;
-#endif
-			HANDLE recvEvent = (HANDLE)TlsGetValue(m_RecvEventTlsIndex);
-			std::queue<stRecvInfo>& recvInfoQ = m_ThreadEventRecvqMap[recvEvent];
-			CRITICAL_SECTION* lockPtr =  m_ThreadEventLockMap[recvEvent];			// 임시 동기화 객체
-			EnterCriticalSection(lockPtr);							// 임시 동기화 객체
-			recvInfoQ.push(recvInfo);
-			LeaveCriticalSection(lockPtr);							// 임시 동기화 객체
-			SetEvent(recvEvent);
+			break;
+		case en_PACKET_CS_CHAT_REQ_SECTOR_MOVE:
+		{
+			recvBuff.Dequeue(message->GetDequeueBufferPtr(), sizeof(MSG_PACKET_CS_CHAT_REQ_SECTOR_MOVE));
+			message->DirectMoveEnqueueOffset(sizeof(MSG_PACKET_CS_CHAT_REQ_SECTOR_MOVE));
 		}
+			break;
+		case en_PACKET_CS_CHAT_REQ_MESSAGE:
+		{
+			WORD messageLen;
+			recvBuff.Peek(sizeof(WORD) + sizeof(INT64), (BYTE*)&messageLen, sizeof(WORD));
+			recvBuff.Dequeue(message->GetDequeueBufferPtr(), sizeof(MSG_PACKET_CS_CHAT_REQ_MESSAGE) + messageLen);
+			message->DirectMoveEnqueueOffset(sizeof(MSG_PACKET_CS_CHAT_REQ_MESSAGE) + messageLen);
+		}
+			break;
+		case en_PACKET_CS_CHAT_REQ_HEARTBEAT:
+		{
+			DebugBreak();
+		}
+			break;
+		default:
+			DebugBreak();
+			break;
+		}
+		
+		// .. 세션 별 메시지 큐 삽입
+		// 메시지 큐 & 메시지 큐 동기화 객체 GET
+		AcquireSRWLockShared(&m_SessionMessageqMapSrwLock);
+		auto msgQueueIter = m_SessionMessageQueueMap.find(sessionID);
+		auto msgQueueLockIter = m_SessionMessageQueueLockMap.find(sessionID);
+		if (msgQueueIter == m_SessionMessageQueueMap.end() || msgQueueLockIter == m_SessionMessageQueueLockMap.end()) {
+			SessionReleaseLog();
+			PlayerFileLog();
+			DebugBreak();
+		}
+		std::queue<JBuffer*>& sessionMsgQ = msgQueueIter->second;
+		CRITICAL_SECTION* lockPtr = msgQueueLockIter->second;
+		ReleaseSRWLockShared(&m_SessionMessageqMapSrwLock);
+
+		EnterCriticalSection(lockPtr);								// 임시 동기화 객체
+		sessionMsgQ.push(message);
+		LeaveCriticalSection(lockPtr);								// 임시 동기화 객체
+
+		recvInfo.recvMsgCnt++;
 	}
 
-	// 정상적인 Decode를 위해선 수신 링버퍼가 한 바퀴 도는 상황을 막아야 함. 추후 Encode, Decode는 라이브러리에서 진행하도록..
-	if (recvBuff.GetUseSize() == 0) {
-		recvBuff.ClearBuffer();
+	if (recvInfo.recvMsgCnt > 0) {
+#if defined(CALCULATE_TRANSACTION_PER_SECOND)
+		InterlockedAdd(&m_CalcTpsItems[RECV_TRANSACTION], recvInfo.recvMsgCnt);
+		InterlockedAdd(&m_TotalTransaction[RECV_TRANSACTION], recvInfo.recvMsgCnt);
+#endif
+#if defined(PLAYER_CREATE_RELEASE_LOG)
+		playerLog.uint0 = recvInfo.recvMsgCnt;
+#endif
+		HANDLE recvEvent = (HANDLE)TlsGetValue(m_RecvEventTlsIndex);
+		std::queue<stRecvInfo>& recvInfoQ = m_ThreadEventRecvqMap[recvEvent];
+		CRITICAL_SECTION* lockPtr =  m_ThreadEventLockMap[recvEvent];			// 임시 동기화 객체
+		EnterCriticalSection(lockPtr);							// 임시 동기화 객체
+		recvInfoQ.push(recvInfo);
+		LeaveCriticalSection(lockPtr);							// 임시 동기화 객체
+		SetEvent(recvEvent);
 	}
 }
 
@@ -487,7 +445,8 @@ void ChattingServer::ProcessMessage(UINT64 sessionID, size_t msgCnt)
 		}
 
 #if defined(ALLOC_BY_TLS_MEM_POOL)
-		m_SerialBuffPoolMgr.GetTlsMemPool().FreeMem(msg, to_string(sessionID) + ", FreeMem (ChattingServer::ProcessMessage)");
+		//m_SerialBuffPoolMgr.GetTlsMemPool().FreeMem(msg, to_string(sessionID) + ", FreeMem (ChattingServer::ProcessMessage)");
+		FreeSerialBuff(msg);
 #else
 		delete msg;
 #endif
@@ -496,6 +455,7 @@ void ChattingServer::ProcessMessage(UINT64 sessionID, size_t msgCnt)
 	}
 }
 
+/*
 //# 원본 데이터 바이트 단위  D1 D2 D3 D4
 //----------------------------------------------------------------------------------------------------------
 //| D1 | D2 | D3 | D4 |
@@ -562,6 +522,7 @@ void ChattingServer::Encode(BYTE randKey, USHORT payloadLen, BYTE& checkSum, BYT
 	Decode(randKey, payloadLen, checkSum, encodedPayloads);
 #endif
 }
+*/
 
 void ChattingServer::Proc_REQ_LOGIN(UINT64 sessionID, MSG_PACKET_CS_CHAT_REQ_LOGIN& body)
 {
@@ -615,24 +576,22 @@ void ChattingServer::Send_RES_LOGIN(UINT64 sessionID, BYTE STATUS, INT64 Account
 #endif
 
 #if defined(ALLOC_BY_TLS_MEM_POOL)
-	JBuffer* sendMessage = m_SerialBuffPoolMgr.GetTlsMemPool().AllocMem(1, to_string(sessionID) + ", Send_RES_LOGIN");
-	sendMessage->ClearBuffer();
+	// 공통 라이브러리 헤더까지 할당
+	//JBuffer* sendMessage = AllocSerialSendBuff(sizeof(MSG_PACKET_CS_CHAT_RES_LOGIN), sessionID, "Send_RES_LOGIN");	
+	JBuffer* sendMessage = AllocSerialSendBuff(sizeof(MSG_PACKET_CS_CHAT_RES_LOGIN));
 #else
 	std::shared_ptr<JBuffer> sendMessage = make_shared<JBuffer>();
-#endif
-
 	stMSG_HDR* hdr = sendMessage->DirectReserve<stMSG_HDR>();
 	hdr->code = dfPACKET_CODE;
 	hdr->len = sizeof(MSG_PACKET_CS_CHAT_RES_LOGIN);
 	hdr->randKey = (BYTE)rand();
+#endif
 
 	(*sendMessage) << (WORD)en_PACKET_CS_CHAT_RES_LOGIN << STATUS << AccountNo;
 
-	Encode(hdr->randKey, hdr->len, hdr->checkSum, sendMessage->GetBufferPtr(sizeof(stMSG_HDR)));
-
 #if defined(ALLOC_BY_TLS_MEM_POOL)
 	if (!SendPacket(sessionID, sendMessage)) {
-		m_SerialBuffPoolMgr.GetTlsMemPool().FreeMem(sendMessage, "FreeMem (SendPacket Fail, Send_RES_LOGIN)");
+		FreeSerialBuff(sendMessage);
 #else
 	if (!SendPacket(sessionID, sendMessage)) {
 #endif
@@ -710,25 +669,21 @@ void ChattingServer::Send_RES_SECTOR_MOVE(UINT64 sessionID, INT64 AccountNo, WOR
 #endif
 
 #if defined(ALLOC_BY_TLS_MEM_POOL)
-	JBuffer* sendMessage = m_SerialBuffPoolMgr.GetTlsMemPool().AllocMem(1, to_string(sessionID) + ", Send_RES_SECTOR_MOVE");
-	sendMessage->ClearBuffer();
+	//JBuffer* sendMessage = AllocSerialSendBuff(sizeof(MSG_PACKET_CS_CHAT_RES_SECTOR_MOVE), sessionID, "Send_RES_SECTOR_MOVE");
+	JBuffer* sendMessage = AllocSerialSendBuff(sizeof(MSG_PACKET_CS_CHAT_RES_SECTOR_MOVE));
 #else
 	std::shared_ptr<JBuffer> sendMessage = make_shared<JBuffer>();
-#endif
-	
-
 	stMSG_HDR* hdr = sendMessage->DirectReserve<stMSG_HDR>();
 	hdr->code = dfPACKET_CODE;
 	hdr->len = sizeof(MSG_PACKET_CS_CHAT_RES_SECTOR_MOVE);
 	hdr->randKey = (BYTE)rand();
+#endif
 
 	(*sendMessage) << (WORD)en_PACKET_CS_CHAT_RES_SECTOR_MOVE << AccountNo << SectorX << SectorY;
 
-	Encode(hdr->randKey, hdr->len, hdr->checkSum, sendMessage->GetBufferPtr(sizeof(stMSG_HDR)));
-
 #if defined(ALLOC_BY_TLS_MEM_POOL)
 	if (!SendPacket(sessionID, sendMessage)) {
-		m_SerialBuffPoolMgr.GetTlsMemPool().FreeMem(sendMessage, "FreeMem (SendPacket Fail, Send_RES_SECTOR_MOVE)");
+		FreeSerialBuff(sendMessage);
 #else
 	if (!SendPacket(sessionID, sendMessage)) {
 #endif
@@ -761,18 +716,15 @@ void ChattingServer::Proc_REQ_MESSAGE(UINT64 sessionID, MSG_PACKET_CS_CHAT_REQ_M
 
 
 #if defined(ALLOC_BY_TLS_MEM_POOL)
-	JBuffer* sendMessage = m_SerialBuffPoolMgr.GetTlsMemPool().AllocMem(1, to_string(sessionID) + ", Proc_REQ_MESSAGE");
-	sendMessage->ClearBuffer();
+	//JBuffer* sendMessage = AllocSerialSendBuff(sizeof(MSG_PACKET_CS_CHAT_RES_MESSAGE) + body.MessageLen, sessionID, "Proc_REQ_MESSAGE");
+	JBuffer* sendMessage = AllocSerialSendBuff(sizeof(MSG_PACKET_CS_CHAT_RES_MESSAGE) + body.MessageLen);
 #else
 	std::shared_ptr<JBuffer> sendMessage = make_shared<JBuffer>();
-#endif
-
-	//tlsMemPool.IncrementRefCnt(sendMessage);		// 공유 전송 메시지
-
 	stMSG_HDR* hdr = sendMessage->DirectReserve<stMSG_HDR>();
 	hdr->code = dfPACKET_CODE;
 	hdr->len = sizeof(MSG_PACKET_CS_CHAT_RES_MESSAGE) + body.MessageLen;
 	hdr->randKey = (BYTE)rand();
+#endif
 
 	AcquireSRWLockShared(&m_SessionAccountMapSrwLock);
 	stAccoutInfo& accountInfo = m_SessionIdAccountMap[sessionID];
@@ -795,7 +747,6 @@ void ChattingServer::Proc_REQ_MESSAGE(UINT64 sessionID, MSG_PACKET_CS_CHAT_REQ_M
 	(*sendMessage) << body.MessageLen;
 	sendMessage->Enqueue(message, body.MessageLen);
 
-	Encode(hdr->randKey, hdr->len, hdr->checkSum, sendMessage->GetBufferPtr(sizeof(stMSG_HDR)));
 	
 	bool ownMsgFlag = false;
 	for (int y = accountInfo.Y - 1; y <= accountInfo.Y + 1; y++) {
@@ -818,10 +769,10 @@ void ChattingServer::Proc_REQ_MESSAGE(UINT64 sessionID, MSG_PACKET_CS_CHAT_REQ_M
 #endif
 
 #if defined(ALLOC_BY_TLS_MEM_POOL)
-				tlsMemPool.IncrementRefCnt(sendMessage, 1, to_string(sessionID) + ", Forwaring Chat Msg to " + to_string(*iter));
-				//std::cout << "[Proc_REQ_MESSAGE | SendPacekt] sessionID: " << *iter << std::endl;
+				AddRefSerialBuff(sendMessage, to_string(sessionID) + ", Forwaring Chat Msg to " + to_string(*iter));
+
 				if (!SendPacket(*iter, sendMessage)) {
-					m_SerialBuffPoolMgr.GetTlsMemPool().FreeMem(sendMessage, "FreeMem (SendPacket Fail, Forwaring Chat Mst)");
+					FreeSerialBuff(sendMessage);
 #else
 				std::shared_ptr<JBuffer> sptr = sendMessage;
 				if(!SendPacket(*iter, sptr)) {
@@ -850,7 +801,8 @@ void ChattingServer::Proc_REQ_MESSAGE(UINT64 sessionID, MSG_PACKET_CS_CHAT_REQ_M
 	}
 	
 #if defined(ALLOC_BY_TLS_MEM_POOL)
-	tlsMemPool.FreeMem(sendMessage, to_string(sessionID) + ", FreeMem (ChattingServer::Proc_REQ_MESSAGE)");
+	//m_SerialBuffPoolMgr.GetTlsMemPool().FreeMem(sendMessage, to_string(sessionID) + ", FreeMem (ChattingServer::Proc_REQ_MESSAGE)");
+	FreeSerialBuff(sendMessage);
 #endif
 }
 
@@ -892,7 +844,8 @@ void ChattingServer::Proc_SessionRelease(UINT64 sessionID)
 			JBuffer* msg = sessionMsgQ.front();
 			sessionMsgQ.pop();
 #if defined(ALLOC_BY_TLS_MEM_POOL)
-			m_SerialBuffPoolMgr.GetTlsMemPool().FreeMem(msg, to_string(sessionID) + ", FreeMem (ChattingServer::Proc_SessionRelease)");
+			//m_SerialBuffPoolMgr.GetTlsMemPool().FreeMem(msg, to_string(sessionID) + ", FreeMem (ChattingServer::Proc_SessionRelease)");
+			FreeSerialBuff(msg);
 #else
 			delete msg;
 #endif
@@ -945,7 +898,8 @@ void ChattingServer::Proc_SessionReleaseBeforeLogin(UINT64 sessionID) {
 			JBuffer* msg = sessionMsgQ.front();
 			sessionMsgQ.pop();
 #if defined(ALLOC_BY_TLS_MEM_POOL)
-			m_SerialBuffPoolMgr.GetTlsMemPool().FreeMem(msg, to_string(sessionID) + ", FreeMem (ChattingServer::Proc_SessionRelease)");
+			//m_SerialBuffPoolMgr.GetTlsMemPool().FreeMem(msg, to_string(sessionID) + ", FreeMem (ChattingServer::Proc_SessionRelease)");
+			FreeSerialBuff(msg);
 #endif
 		}
 
