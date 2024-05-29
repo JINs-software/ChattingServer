@@ -21,17 +21,21 @@ int main() {
 				break;
 			}
 #if defined(ALLOC_MEM_LOG)
-			else if (ctr == 'c' || ctr == 'C') {
+			else if (ctr == 'm' || ctr == 'M') {
 				chatserver.MemAllocLog();
 				DebugBreak();
 			}
 #endif
-			else if (ctr == 'd' || ctr == 'D') {
+#if defined(SESSION_LOG)
+			else if (ctr == 'r' || ctr == 'R') {
 				chatserver.SessionReleaseLog();
 				DebugBreak();
 			}
-			else if (ctr == 'p' || ctr == 'P') {
+#endif
+			else if (ctr == 'a' || ctr == 'A') {
+#if defined(SESSION_LOG)
 				chatserver.SessionReleaseLog();
+#endif
 #if defined(PLAYER_CREATE_RELEASE_LOG)
 				chatserver.PlayerFileLog();
 #endif

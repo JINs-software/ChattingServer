@@ -9,8 +9,6 @@
 #include <set>
 #include <unordered_map>
 
-#define PLAYER_CREATE_RELEASE_LOG
-
 class ChattingServer : public CLanServer
 {
 #if defined(PLAYER_CREATE_RELEASE_LOG)

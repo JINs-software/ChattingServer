@@ -185,8 +185,12 @@ void ChattingServer::OnClientLeave(uint64 sessionID)
 	auto msgQueueIter = m_SessionMessageQueueMap.find(sessionID);
 	auto msgQueueLockIter = m_SessionMessageQueueLockMap.find(sessionID);
 	if (msgQueueIter == m_SessionMessageQueueMap.end() || msgQueueLockIter == m_SessionMessageQueueLockMap.end()) {
+#if defined(SESSION_LOG)
 		SessionReleaseLog();
+#endif
+#if defined(PLAYER_CREATE_RELEASE_LOG)
 		PlayerFileLog();
+#endif
 		DebugBreak();
 	}
 	std::queue<JBuffer*>& sessionMsgQ = msgQueueIter->second;
@@ -274,8 +278,12 @@ void ChattingServer::OnRecv(uint64 sessionID, JBuffer& recvBuff)
 		auto msgQueueIter = m_SessionMessageQueueMap.find(sessionID);
 		auto msgQueueLockIter = m_SessionMessageQueueLockMap.find(sessionID);
 		if (msgQueueIter == m_SessionMessageQueueMap.end() || msgQueueLockIter == m_SessionMessageQueueLockMap.end()) {
+#if defined(SESSION_LOG)
 			SessionReleaseLog();
+#endif
+#if defined(PLAYER_CREATE_RELEASE_LOG)
 			PlayerFileLog();
+#endif
 			DebugBreak();
 		}
 		std::queue<JBuffer*>& sessionMsgQ = msgQueueIter->second;
@@ -368,8 +376,12 @@ void ChattingServer::ProcessMessage(UINT64 sessionID, size_t msgCnt)
 	auto msgQueueLockIter = m_SessionMessageQueueLockMap.find(sessionID);
 	if (msgQueueIter == m_SessionMessageQueueMap.end() || msgQueueLockIter == m_SessionMessageQueueLockMap.end()) {
 		// 세션 삭제 메시지가 먼저 큐에 들어옴 -> 세션 관련 자료구조 삭제
+#if defined(SESSION_LOG)
 		SessionReleaseLog();
+#endif
+#if defined(PLAYER_CREATE_RELEASE_LOG)
 		PlayerFileLog();
+#endif
 		DebugBreak();
 		return;
 	}
