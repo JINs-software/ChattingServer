@@ -10,9 +10,9 @@ int main() {
 	//)
 
 #if defined(SINGLE_UPDATE_THREAD)
-	ChattingServer chatserver(1, NULL, 12001, 0, 1, CHAT_SERV_LIMIT_ACCEPTANCE);
+	ChattingServer chatserver(1, NULL, 12001, 0, IOCP_WORKER_THREAD_CNT, CHAT_SERV_LIMIT_ACCEPTANCE);
 #else
-	ChattingServer chatserver(MAX_PROCESS_THREAD_CNT, NULL, 12001, 0, 1, CHAT_SERV_LIMIT_ACCEPTANCE);
+	ChattingServer chatserver(PROCESS_THREAD_CNT, NULL, 12001, 0, IOCP_WORKER_THREAD_CNT, CHAT_SERV_LIMIT_ACCEPTANCE);
 #endif
 
 	chatserver.Start();
