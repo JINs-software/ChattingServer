@@ -474,6 +474,10 @@ void ChattingServer::ProcessMessage(UINT64 sessionID, size_t msgCnt)
 		//LeaveCriticalSection(sessionMsgQLock);						
 		// => 단일 메시지 처리 동안은 메시지 큐 락 (멀티 스레드에서 단일 세션에서의 순서 제어)
 
+		// 단일 세션에서의 순서 제어는 프로카데미 채팅 더미에서는 불필요함
+		// 또한 메시지 처리 이후에 LeaveCriticalSection(sessionMsgQLock)를 호출하면 en_SESSION_RELEASE/en_SESSION_RELEASE_BEFORE_LOGIN의 메시지 처리의 경우 삭제된 동기화 객체에 대해 호출하여 메모리 오염을 유발함이 발견됨
+		LeaveCriticalSection(sessionMsgQLock);
+
 		WORD type;
 		msg->Peek(&type);
 		switch (type)
@@ -534,7 +538,9 @@ void ChattingServer::ProcessMessage(UINT64 sessionID, size_t msgCnt)
 		delete msg;
 #endif
 
-		LeaveCriticalSection(sessionMsgQLock);
+		//LeaveCriticalSection(sessionMsgQLock);
+		// => 치명적인 결함 발생, 만약 메시지가 en_SESSION_RELEASE이나 en_SESSION_RELEASE_BEFORE_LOGIN를 처리하는 것이라면, 해당 처리 함수에서 세션 메시지 큐를 삭제함
+		//	  따라서 메모리 오염이 발생하여, 다른 자료구조 관리 자료구조에 영향을 주는 것으로 확인)
 	}
 }
 
@@ -720,6 +726,9 @@ void ChattingServer::Proc_REQ_SECTOR_MOVE(UINT64 sessionID, MSG_PACKET_CS_CHAT_R
 
 #if defined(SINGLE_UPDATE_THREAD)
 	AcquireSRWLockShared(&m_SessionAccountMapSrwLock);
+	if (m_SessionIdAccountMap.find(sessionID) == m_SessionIdAccountMap.end()) {
+		DebugBreak();
+	}
 	stAccoutInfo* accountInfo = &m_SessionIdAccountMap[sessionID];
 	ReleaseSRWLockShared(&m_SessionAccountMapSrwLock);
 #else
@@ -879,6 +888,9 @@ void ChattingServer::Proc_REQ_MESSAGE(UINT64 sessionID, MSG_PACKET_CS_CHAT_REQ_M
 	// => 참조 카운터 증가 (스마트 포인터)
 	AcquireSRWLockShared(&m_SessionAccountMapSrwLock);
 #if defined(SINGLE_UPDATE_THREAD)
+	if (m_SessionIdAccountMap.find(sessionID) == m_SessionIdAccountMap.end()) {
+		DebugBreak();
+	}
 	stAccoutInfo* accountInfo = &m_SessionIdAccountMap[sessionID];
 #else
 	std::shared_ptr<stAccoutInfo> accountInfo = m_SessionIdAccountMap[sessionID];
@@ -987,6 +999,9 @@ void ChattingServer::Proc_SessionRelease(UINT64 sessionID)
 	// => 참조 카운터 증가 (스마트 포인터)
 	AcquireSRWLockShared(&m_SessionAccountMapSrwLock);
 #if defined(SINGLE_UPDATE_THREAD)
+	if (m_SessionIdAccountMap.find(sessionID) == m_SessionIdAccountMap.end()) {
+		DebugBreak();
+	}
 	stAccoutInfo* accountInfo = &m_SessionIdAccountMap[sessionID];
 #else
 	std::shared_ptr<stAccoutInfo> accountInfo = m_SessionIdAccountMap[sessionID];
