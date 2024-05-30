@@ -8,7 +8,7 @@ int main() {
 	//	UINT16 maxOfConnections, bool beNagle = true,
 	//	UINT32 sessionSendBuffSize = CHAT_SERV_SESSION_SEND_BUFF_SIZE, UINT32 sessionRecvBuffSize = CHAT_SERV_SESSION_RECV_BUFF_SIZE
 	//)
-	ChattingServer chatserver(NULL, 12001, 0, 4, CHAT_SERV_LIMIT_ACCEPTANCE);
+	ChattingServer chatserver(NULL, 12001, 0, IOCP_WORKER_THREAD_CNT, CHAT_SERV_LIMIT_ACCEPTANCE);
 
 	chatserver.Start();
 

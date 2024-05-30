@@ -83,7 +83,11 @@ public:
 		m_DeletedSendPacketIdx = -1;
 		m_DeletedSendPacketLog.resize(USHRT_MAX + 1);
 #endif
+#if defined(dfPROCESSING_MODE_SESSIONQ_RECV_INFO_EVENT)
 		m_RecvEventTlsIndex = TlsAlloc();
+#elif defined(dfPROCESSING_MODE_SESSIONQ_POLLING)
+		m_TlsRecvQueueVec.resize(IOCP_WORKER_THREAD_CNT);
+#endif
 		InitializeSRWLock(&m_SessionMessageqMapSrwLock);
 
 		// SRWLOCK m_SectorSrwLock[dfSECTOR_Y_MAX + 1][dfSECTOR_X_MAX + 1];
@@ -102,17 +106,18 @@ private:
 	virtual void OnWorkerThreadStart() override;
 	virtual bool OnConnectionRequest(/*IP, Port*/) override;
 	virtual void OnClientJoin(UINT64 sessionID) override;
-	//virtual void OnDeleteSendPacket(uint64 sessionID, JBuffer& sendRingBuffer) override;
 	virtual void OnClientLeave(UINT64 sessionID) override;
 	virtual void OnRecv(UINT64 sessionID, JBuffer& recvBuff) override;
 	virtual void OnError() override;
 
 public:
 	virtual void ServerConsoleLog() override {
+#if defined(dfPROCESSING_MODE_SESSIONQ_RECV_INFO_EVENT)
 		std::cout << "[thread recvInfo queue]" << std::endl;
 		for (auto recvq : m_ThreadEventRecvqMap) {
 			std::cout << "	size: " << recvq.second.size() << std::endl;
 		}
+#endif
 		std::cout << "[Login Wait Session] : " << m_LoginWaitSessions.size() << std::endl;
 		std::cout << "[Session Msg Queue Cnt] : " << m_SessionMessageQueueMap.size() << std::endl;
 		std::cout << "[Account Map size] : " << m_SessionIdAccountMap.size() << std::endl;
@@ -127,10 +132,11 @@ public:
 
 private:
 	size_t	m_LimitAcceptance;
-	DWORD	m_RecvEventTlsIndex;
-
 	// IOCP 작업자 스레드 갯수
 	UINT8	m_WorkerThreadCnt;
+
+#if defined(dfPROCESSING_MODE_SESSIONQ_RECV_INFO_EVENT)
+	DWORD	m_RecvEventTlsIndex;
 	// IOCP 작업자 스레드의 수신 이벤트 배열
 	HANDLE	m_WorkerThreadRecvEvents[MAX_WORKER_THREAD_CNT];
 	// 작업자 스레드 <-> 작업자 스레드 사용 수신 이벤트 초기 연결용 맵
@@ -138,12 +144,16 @@ private:
 	// 작업자 스레드에서 key 획득을 위해 호출하는 GetCurrentThread 함수는 의사 핸들 반환
 	// 따라서 key는 스레드 핸들이 아닌 스레드 ID로 변경
 	std::map<DWORD, HANDLE> thEventIndexMap;
-
 	// 작업자 스레드 수신 이벤트 <-> RecvInfo 큐 맵핑
 	std::unordered_map<HANDLE, std::queue<stRecvInfo>>	m_ThreadEventRecvqMap;
 	// 임시 동기화 객체 (추후 락-프리 큐로 변경)
 	// 충돌 대상: 멀티-프로세싱(업데이트) 스레드 간
-	std::unordered_map < HANDLE, CRITICAL_SECTION*>		m_ThreadEventLockMap;
+	std::unordered_map<HANDLE, CRITICAL_SECTION*>		m_ThreadEventLockMap;
+#elif defined(dfPROCESSING_MODE_SESSIONQ_POLLING)
+	DWORD												m_TlsRecvQueueIdx;
+	DWORD												m_TlsRecvQueueLockIdx;
+	std::vector<std::pair<std::queue<stRecvInfo>*, CRITICAL_SECTION*>>	m_TlsRecvQueueVec;
+#endif
 
 	// 세션 별 자료구조
 	std::set<UINT64>	m_LoginWaitSessions;
@@ -185,10 +195,6 @@ private:
 	// Process Thread Working Function
 	static UINT __stdcall ProcessThreadFunc(void* arg);
 	void ProcessMessage(UINT64 sessionID, size_t msgCnt);
-
-	//bool Decode(BYTE randKey, USHORT payloadLen, BYTE checkSum, BYTE* payloads);
-	//void Encode(BYTE randKey, USHORT payloadLen, BYTE& checkSum, BYTE* payloads);
-	//=> 라이브러리 단에서 수행
 
 	void Proc_REQ_LOGIN(UINT64 sessionID, MSG_PACKET_CS_CHAT_REQ_LOGIN& body);
 	void Send_RES_LOGIN(UINT64 sessionID, BYTE STATUS, INT64 AccountNo);

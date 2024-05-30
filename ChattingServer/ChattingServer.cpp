@@ -3,16 +3,19 @@
 
 bool ChattingServer::OnWorkerThreadCreate(HANDLE thHnd)
 {
-	if (m_WorkerThreadCnt >= MAX_WORKER_THREAD_CNT) {
+	if (m_WorkerThreadCnt >= IOCP_WORKER_THREAD_CNT) {
 		return false;
 	}
 
+#if defined(dfPROCESSING_MODE_SESSIONQ_RECV_INFO_EVENT)
 	HANDLE recvEvent = CreateEvent(NULL, FALSE, FALSE, NULL);
 	UINT8 eventIdx = m_WorkerThreadCnt++;
 	m_WorkerThreadRecvEvents[eventIdx] = recvEvent;
 	DWORD thID = GetThreadId(thHnd);
 	thEventIndexMap.insert({ thID, recvEvent });
-
+#elif defined(dfPROCESSING_MODE_SESSIONQ_POLLING)
+	m_WorkerThreadCnt++;
+#endif
 	return true;
 }
 
@@ -22,6 +25,7 @@ void ChattingServer::OnWorkerThreadCreateDone()
 }
 
 void ChattingServer::OnWorkerThreadStart() {
+#if defined(dfPROCESSING_MODE_SESSIONQ_RECV_INFO_EVENT)
 	if (TlsGetValue(m_RecvEventTlsIndex) == NULL) {
 		DWORD thID = GetThreadId(GetCurrentThread());
 		HANDLE thEventHnd = thEventIndexMap[thID];
@@ -36,6 +40,23 @@ void ChattingServer::OnWorkerThreadStart() {
 	else {
 		DebugBreak();
 	}
+#elif defined(dfPROCESSING_MODE_SESSIONQ_POLLING)
+	static LONG sidx = 0;
+	LONG idx = InterlockedIncrement(&sidx);
+
+	if (TlsGetValue(m_TlsRecvQueueIdx) == NULL && TlsGetValue(m_TlsRecvQueueLockIdx) == NULL) {
+		std::queue<stRecvInfo>* recvQueue = new std::queue<stRecvInfo>;
+		CRITICAL_SECTION* lockPtr = new CRITICAL_SECTION;
+		InitializeCriticalSection(lockPtr);
+		m_TlsRecvQueueVec[idx - 1].first = recvQueue;
+		m_TlsRecvQueueVec[idx - 1].second = lockPtr;
+		TlsSetValue(m_TlsRecvQueueIdx, recvQueue);
+		TlsSetValue(m_TlsRecvQueueLockIdx, lockPtr);
+	}
+	else {
+		DebugBreak();
+	}
+#endif
 }
 
 bool ChattingServer::OnConnectionRequest()
@@ -201,17 +222,28 @@ void ChattingServer::OnClientLeave(uint64 sessionID)
 	sessionMsgQ.push(message);
 	LeaveCriticalSection(lockPtr);								// 임시 동기화 객체
 
+#if defined(dfPROCESSING_MODE_SESSIONQ_RECV_INFO_EVENT)
 	stRecvInfo recvInfo;
 	recvInfo.sessionID = sessionID;
 	recvInfo.recvMsgCnt = 1;
 	HANDLE recvEvent = (HANDLE)TlsGetValue(m_RecvEventTlsIndex);
 	std::queue<stRecvInfo>& recvInfoQ = m_ThreadEventRecvqMap[recvEvent];
 
-	lockPtr = m_ThreadEventLockMap[recvEvent];								// 임시 동기화 객체
+	lockPtr = m_ThreadEventLockMap[recvEvent];				// 임시 동기화 객체
 	EnterCriticalSection(lockPtr);							// 임시 동기화 객체
 	recvInfoQ.push(recvInfo);
 	LeaveCriticalSection(lockPtr);							// 임시 동기화 객체
 	SetEvent(recvEvent);
+#elif defined(dfPROCESSING_MODE_SESSIONQ_POLLING)
+	stRecvInfo recvInfo;
+	recvInfo.sessionID = sessionID;
+	recvInfo.recvMsgCnt = 1;
+	std::queue<stRecvInfo>* recvInfoQ = (std::queue<stRecvInfo>*)TlsGetValue(m_TlsRecvQueueIdx);
+	lockPtr = (CRITICAL_SECTION*)TlsGetValue(m_TlsRecvQueueLockIdx);
+	EnterCriticalSection(lockPtr);							// 임시 동기화 객체
+	recvInfoQ->push(recvInfo);
+	LeaveCriticalSection(lockPtr);							// 임시 동기화 객체
+#endif
 }
 
 void ChattingServer::OnRecv(uint64 sessionID, JBuffer& recvBuff)
@@ -305,13 +337,25 @@ void ChattingServer::OnRecv(uint64 sessionID, JBuffer& recvBuff)
 #if defined(PLAYER_CREATE_RELEASE_LOG)
 		playerLog.uint0 = recvInfo.recvMsgCnt;
 #endif
+
+#if defined(dfPROCESSING_MODE_SESSIONQ_RECV_INFO_EVENT)
 		HANDLE recvEvent = (HANDLE)TlsGetValue(m_RecvEventTlsIndex);
 		std::queue<stRecvInfo>& recvInfoQ = m_ThreadEventRecvqMap[recvEvent];
 		CRITICAL_SECTION* lockPtr =  m_ThreadEventLockMap[recvEvent];			// 임시 동기화 객체
-		EnterCriticalSection(lockPtr);							// 임시 동기화 객체
+		EnterCriticalSection(lockPtr);											// 임시 동기화 객체
 		recvInfoQ.push(recvInfo);
-		LeaveCriticalSection(lockPtr);							// 임시 동기화 객체
+		LeaveCriticalSection(lockPtr);											// 임시 동기화 객체
 		SetEvent(recvEvent);
+#elif defined(dfPROCESSING_MODE_SESSIONQ_POLLING)
+		stRecvInfo recvInfo;
+		recvInfo.sessionID = sessionID;
+		recvInfo.recvMsgCnt = 1;
+		std::queue<stRecvInfo>* recvInfoQ = (std::queue<stRecvInfo>*)TlsGetValue(m_TlsRecvQueueIdx);
+		CRITICAL_SECTION* lockPtr = (CRITICAL_SECTION*)TlsGetValue(m_TlsRecvQueueLockIdx);
+		EnterCriticalSection(lockPtr);							// 임시 동기화 객체
+		recvInfoQ->push(recvInfo);
+		LeaveCriticalSection(lockPtr);							// 임시 동기화 객체
+#endif
 	}
 }
 
@@ -329,14 +373,12 @@ UINT __stdcall ChattingServer::ProcessThreadFunc(void* arg)
 #endif
 
 	while (true) {
+#if defined(dfPROCESSING_MODE_SESSIONQ_RECV_INFO_EVENT)
 		DWORD ret = WaitForMultipleObjects(server->m_WorkerThreadCnt, server->m_WorkerThreadRecvEvents, FALSE, INFINITE);
 		if (WAIT_OBJECT_0 <= ret && ret < WAIT_OBJECT_0 + server->m_WorkerThreadCnt) {
 			HANDLE recvEvent = server->m_WorkerThreadRecvEvents[ret];
 			std::queue<stRecvInfo>& recvQ = server->m_ThreadEventRecvqMap[recvEvent];
 			CRITICAL_SECTION* lockPtr = server->m_ThreadEventLockMap[recvEvent];		// 임시 동기화 객체
-			//if (recvQ.size() > 1) {
-			//	DebugBreak();
-			//}
 
 			size_t recvQueueSize = recvQ.size();	// -> 이 크기에 포함되지 않은 수신 정보는 다음 이벤트에서 확인됨이 보장.
 			// OnRecv 쪽에서 (1) 수신 정보 인큐, (2) SetEvent 순 이기에...
@@ -354,6 +396,22 @@ UINT __stdcall ChattingServer::ProcessThreadFunc(void* arg)
 		else {
 			// WaitForMultipleObjects Error..
 			DebugBreak();
+		}
+#endif
+		for (auto iter : server->m_TlsRecvQueueVec) {
+			std::queue<stRecvInfo>* recvInfoQ = iter.first;
+			CRITICAL_SECTION* lockPtr = iter.second;
+			size_t recvQueueSize = recvInfoQ->size();
+			for (size_t i = 0; i < recvQueueSize; i++) {
+				EnterCriticalSection(lockPtr);							// 임시 동기화 객체
+				stRecvInfo& recvInfo = recvInfoQ->front();
+				UINT64 sessionID = recvInfo.sessionID;
+				size_t recvSize = recvInfo.recvMsgCnt;
+				recvInfoQ->pop();
+				LeaveCriticalSection(lockPtr);							// 임시 동기화 객체	
+
+				server->ProcessMessage(sessionID, recvSize);
+			}
 		}
 
 	}
