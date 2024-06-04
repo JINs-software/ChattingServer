@@ -397,7 +397,7 @@ UINT __stdcall ChattingServer::ProcessThreadFunc(void* arg)
 			// WaitForMultipleObjects Error..
 			DebugBreak();
 		}
-#endif
+#elif defined(dfPROCESSING_MODE_SESSIONQ_POLLING)
 		for (auto iter : server->m_TlsRecvQueueVec) {
 			std::queue<stRecvInfo>* recvInfoQ = iter.first;
 			CRITICAL_SECTION* lockPtr = iter.second;
@@ -413,7 +413,7 @@ UINT __stdcall ChattingServer::ProcessThreadFunc(void* arg)
 				server->ProcessMessage(sessionID, recvSize);
 			}
 		}
-
+#endif
 	}
 }
 

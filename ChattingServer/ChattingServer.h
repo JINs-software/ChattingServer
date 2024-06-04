@@ -86,6 +86,8 @@ public:
 #if defined(dfPROCESSING_MODE_SESSIONQ_RECV_INFO_EVENT)
 		m_RecvEventTlsIndex = TlsAlloc();
 #elif defined(dfPROCESSING_MODE_SESSIONQ_POLLING)
+		m_TlsRecvQueueIdx = TlsAlloc();
+		m_TlsRecvQueueLockIdx = TlsAlloc();
 		m_TlsRecvQueueVec.resize(IOCP_WORKER_THREAD_CNT);
 #endif
 		InitializeSRWLock(&m_SessionMessageqMapSrwLock);
@@ -138,7 +140,7 @@ private:
 #if defined(dfPROCESSING_MODE_SESSIONQ_RECV_INFO_EVENT)
 	DWORD	m_RecvEventTlsIndex;
 	// IOCP 작업자 스레드의 수신 이벤트 배열
-	HANDLE	m_WorkerThreadRecvEvents[MAX_WORKER_THREAD_CNT];
+	HANDLE	m_WorkerThreadRecvEvents[IOCP_WORKER_THREAD_CNT];
 	// 작업자 스레드 <-> 작업자 스레드 사용 수신 이벤트 초기 연결용 맵
 	//std::map<HANDLE, HANDLE> thEventIndexMap;
 	// 작업자 스레드에서 key 획득을 위해 호출하는 GetCurrentThread 함수는 의사 핸들 반환
@@ -150,8 +152,8 @@ private:
 	// 충돌 대상: 멀티-프로세싱(업데이트) 스레드 간
 	std::unordered_map<HANDLE, CRITICAL_SECTION*>		m_ThreadEventLockMap;
 #elif defined(dfPROCESSING_MODE_SESSIONQ_POLLING)
-	DWORD												m_TlsRecvQueueIdx;
-	DWORD												m_TlsRecvQueueLockIdx;
+	DWORD												m_TlsRecvQueueIdx;					// IOCP 작업자 스레드의 RecvEvent Queue Info TlsIdx
+	DWORD												m_TlsRecvQueueLockIdx;				// IOCP 작업자 스레드의 RecvEvent Queue Lock TlsIdx
 	std::vector<std::pair<std::queue<stRecvInfo>*, CRITICAL_SECTION*>>	m_TlsRecvQueueVec;
 #endif
 
