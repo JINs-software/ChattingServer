@@ -363,6 +363,36 @@ void ChattingServer::OnError()
 {
 }
 
+#if defined(CONNECT_MOINTORING_SERVER)
+void ChattingServer::OnEnterJoinServer()
+{
+	m_MontDataMap.insert({ dfMONITOR_DATA_TYPE_CHAT_SERVER_RUN , {0} });
+	m_MontDataMap.insert({ dfMONITOR_DATA_TYPE_CHAT_SERVER_CPU , {0} });
+	m_MontDataMap.insert({ dfMONITOR_DATA_TYPE_CHAT_SERVER_MEM , {0} });
+	m_MontDataMap.insert({ dfMONITOR_DATA_TYPE_CHAT_SESSION , {0} });
+	m_MontDataMap.insert({ dfMONITOR_DATA_TYPE_CHAT_PLAYER , {0} });
+	m_MontDataMap.insert({ dfMONITOR_DATA_TYPE_CHAT_UPDATE_TPS , {0} });
+	m_MontDataMap.insert({ dfMONITOR_DATA_TYPE_CHAT_PACKET_POOL , {0} });
+	m_MontDataMap.insert({ dfMONITOR_DATA_TYPE_CHAT_UPDATEMSG_POOL , {0} });
+
+	m_PerfCounter = new PerformanceCounter();
+	m_PerfCounter->SetCpuUsageCounter();
+	// dfQUERY_PROCESS_USER_VMEMORY_USAGE
+	m_PerfCounter->SetCounter(CHAT_SERVER_MEMORY_USAGE_QUERY, dfQUERY_PROCESS_USER_VMEMORY_USAGE);
+
+	m_PerfCountThreadFunc = (HANDLE)_beginthreadex(NULL, 0, PerformanceCountFunc, this, 0, NULL);
+}
+
+void ChattingServer::OnLeaveServer()
+{
+	m_PerfCountStop = true;
+}
+
+void ChattingServer::OnRecvFromCLanServer(JBuffer& recvBuff)
+{
+}
+#endif
+
 UINT __stdcall ChattingServer::ProcessThreadFunc(void* arg)
 {
 	ChattingServer* server = (ChattingServer*)arg;
@@ -372,7 +402,8 @@ UINT __stdcall ChattingServer::ProcessThreadFunc(void* arg)
 													// AllocTlsMemPool()로 부터 반환된 인덱스는 IOCP 작업자 스레드 도입부에서 CLanServer 멤버에 저장되었다 가정
 #endif
 
-	while (true) {
+
+	while(true) {
 #if defined(dfPROCESSING_MODE_SESSIONQ_RECV_INFO_EVENT)
 		DWORD ret = WaitForMultipleObjects(server->m_WorkerThreadCnt, server->m_WorkerThreadRecvEvents, FALSE, INFINITE);
 		if (WAIT_OBJECT_0 <= ret && ret < WAIT_OBJECT_0 + server->m_WorkerThreadCnt) {
@@ -391,6 +422,9 @@ UINT __stdcall ChattingServer::ProcessThreadFunc(void* arg)
 				LeaveCriticalSection(lockPtr);							// 임시 동기화 객체	
 
 				server->ProcessMessage(sessionID, recvSize);
+#if defined(CONNECT_MOINTORING_SERVER)
+				server->m_UpdateThreadTransaction++;
+#endif
 			}
 		}
 		else {
@@ -411,6 +445,9 @@ UINT __stdcall ChattingServer::ProcessThreadFunc(void* arg)
 				LeaveCriticalSection(lockPtr);							// 임시 동기화 객체	
 
 				server->ProcessMessage(sessionID, recvSize);
+#if defined(CONNECT_MOINTORING_SERVER)
+				server->m_UpdateThreadTransaction++;
+#endif
 			}
 		}
 #endif
@@ -523,6 +560,68 @@ void ChattingServer::ProcessMessage(UINT64 sessionID, size_t msgCnt)
 
 
 	}
+}
+
+UINT __stdcall ChattingServer::PerformanceCountFunc(void* arg)
+{
+	ChattingServer* chatserver = (ChattingServer*)arg;
+	chatserver->m_SerialBuffPoolMgr.AllocTlsMemPool();
+
+	JBuffer* loginMsg = chatserver->AllocSerialSendBuff(sizeof(WORD) + sizeof(int));
+	*loginMsg << (WORD)en_PACKET_SS_MONITOR_LOGIN;
+	*loginMsg << (int)dfSERVER_CHAT_SERVER;
+	chatserver->SendPacketToCLanServer(loginMsg);
+
+	while (!chatserver->m_PerfCountStop) {
+		time_t now = time(NULL);
+
+		chatserver->m_UpdateThreadTps = chatserver->m_UpdateThreadTransaction;
+		chatserver->m_UpdateThreadTransaction = 0;
+
+		chatserver->m_PerfCounter->ResetPerfCounter();
+		chatserver->m_MontDataMap[dfMONITOR_DATA_TYPE_CHAT_SERVER_RUN].dataValue = 1;
+		chatserver->m_MontDataMap[dfMONITOR_DATA_TYPE_CHAT_SERVER_RUN].timeStamp = now;
+		chatserver->m_MontDataMap[dfMONITOR_DATA_TYPE_CHAT_SERVER_CPU].dataValue = chatserver->m_PerfCounter->ProcessTotal();
+		chatserver->m_MontDataMap[dfMONITOR_DATA_TYPE_CHAT_SERVER_CPU].timeStamp = now;
+		chatserver->m_MontDataMap[dfMONITOR_DATA_TYPE_CHAT_SERVER_MEM].dataValue = chatserver->m_PerfCounter->GetPerfCounter(CHAT_SERVER_MEMORY_USAGE_QUERY);
+		chatserver->m_MontDataMap[dfMONITOR_DATA_TYPE_CHAT_SERVER_MEM].timeStamp = now;
+		chatserver->m_MontDataMap[dfMONITOR_DATA_TYPE_CHAT_SESSION].dataValue = chatserver->GetSessionCount();		// GetSessionCount
+		chatserver->m_MontDataMap[dfMONITOR_DATA_TYPE_CHAT_SESSION].timeStamp = now;
+		chatserver->m_MontDataMap[dfMONITOR_DATA_TYPE_CHAT_PLAYER].dataValue = chatserver->m_SessionIdAccountMap.size();
+		chatserver->m_MontDataMap[dfMONITOR_DATA_TYPE_CHAT_PLAYER].timeStamp = now;
+		chatserver->m_MontDataMap[dfMONITOR_DATA_TYPE_CHAT_UPDATE_TPS].dataValue = chatserver->m_UpdateThreadTps;
+		chatserver->m_MontDataMap[dfMONITOR_DATA_TYPE_CHAT_UPDATE_TPS].timeStamp = now;
+		chatserver->m_MontDataMap[dfMONITOR_DATA_TYPE_CHAT_PACKET_POOL].dataValue = chatserver->GetAllocMemPoolUsageSize();
+		chatserver->m_MontDataMap[dfMONITOR_DATA_TYPE_CHAT_PACKET_POOL].timeStamp = now;
+		chatserver->m_MontDataMap[dfMONITOR_DATA_TYPE_CHAT_UPDATEMSG_POOL].dataValue = 0;
+		chatserver->m_MontDataMap[dfMONITOR_DATA_TYPE_CHAT_UPDATEMSG_POOL].timeStamp = now;
+
+		chatserver->SendPerfCountMsg();
+
+		Sleep(1000);
+	}
+	return 0;
+}
+
+void ChattingServer::SendPerfCountMsg()
+{
+	JBuffer* perfMsg = AllocSerialBuff();
+	for (auto iter : m_MontDataMap) {
+		BYTE dataType = iter.first;
+		stMontData& montData = iter.second;
+
+		stMSG_HDR* hdr = perfMsg->DirectReserve<stMSG_HDR>();
+		hdr->code = dfPACKET_CODE;
+		hdr->len = sizeof(WORD) + sizeof(BYTE) + sizeof(int) + sizeof(int);
+		hdr->randKey = (BYTE)(-1);
+		stMSG_MONITOR_DATA_UPDATE* body = perfMsg->DirectReserve<stMSG_MONITOR_DATA_UPDATE>();
+		body->Type = en_PACKET_SS_MONITOR_DATA_UPDATE;
+		body->DataType = dataType;
+		body->DataValue = montData.dataValue;
+		body->TimeStamp = montData.timeStamp;
+	}
+
+	SendPacketToCLanServer(perfMsg);
 }
 
 /*

@@ -169,4 +169,12 @@ struct MSG_PACKET_CS_CHAT_REQ_HEARTBEAT {
 	WORD		Type;
 };
 
+struct stMSG_MONITOR_DATA_UPDATE {
+	WORD	Type;
+	BYTE	DataType;
+	int		DataValue;
+	int		TimeStamp;
+
+};
+
 #pragma pack(pop)

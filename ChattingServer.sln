@@ -11,6 +11,8 @@ Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "MessageEncryption", "Messag
 EndProject
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "TlsMemPool", "..\..\0. Utility\MemoryPool\TlsMemPool\TlsMemPool.vcxproj", "{883CB26E-BC73-44C8-B883-0FFF663F6AD2}"
 EndProject
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "PerformanceCounter", "..\..\0. Utility\PerformanceCounter\PerformanceCounter\PerformanceCounter.vcxproj", "{ED2DADF7-A54A-42EB-A94C-9BA9B2A6218F}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|x64 = Debug|x64
@@ -51,6 +53,14 @@ Global
 		{883CB26E-BC73-44C8-B883-0FFF663F6AD2}.Release|x64.Build.0 = Release|x64
 		{883CB26E-BC73-44C8-B883-0FFF663F6AD2}.Release|x86.ActiveCfg = Release|Win32
 		{883CB26E-BC73-44C8-B883-0FFF663F6AD2}.Release|x86.Build.0 = Release|Win32
+		{ED2DADF7-A54A-42EB-A94C-9BA9B2A6218F}.Debug|x64.ActiveCfg = Debug|x64
+		{ED2DADF7-A54A-42EB-A94C-9BA9B2A6218F}.Debug|x64.Build.0 = Debug|x64
+		{ED2DADF7-A54A-42EB-A94C-9BA9B2A6218F}.Debug|x86.ActiveCfg = Debug|Win32
+		{ED2DADF7-A54A-42EB-A94C-9BA9B2A6218F}.Debug|x86.Build.0 = Debug|Win32
+		{ED2DADF7-A54A-42EB-A94C-9BA9B2A6218F}.Release|x64.ActiveCfg = Release|x64
+		{ED2DADF7-A54A-42EB-A94C-9BA9B2A6218F}.Release|x64.Build.0 = Release|x64
+		{ED2DADF7-A54A-42EB-A94C-9BA9B2A6218F}.Release|x86.ActiveCfg = Release|Win32
+		{ED2DADF7-A54A-42EB-A94C-9BA9B2A6218F}.Release|x86.Build.0 = Release|Win32
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE

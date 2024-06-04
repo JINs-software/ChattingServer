@@ -1,15 +1,26 @@
 #pragma once
 
-#include "CLanServer.h"
-#include "ChattingProtocol.h"
 #include "ChattingServerConfig.h"
+
+#if defined(CONNECT_MOINTORING_SERVER)
+#include "CLanClient.h"
+#include "PerformanceCounter.h"
+#else
+#include "CLanServer.h"
+#endif
+#include "ChattingProtocol.h"
+
 #include "DataStruct.h"
 
 #include <map>
 #include <set>
 #include <unordered_map>
 
+#if defined(CONNECT_MOINTORING_SERVER)
+class ChattingServer : public CLanClient
+#else
 class ChattingServer : public CLanServer
+#endif
 {
 #if defined(PLAYER_CREATE_RELEASE_LOG)
 	struct stPlayerLog {
@@ -57,10 +68,19 @@ public:
 		uint32 sessionSendBuffSize = CHAT_SERV_SESSION_SEND_BUFF_SIZE, uint32 sessionRecvBuffSize = CHAT_SERV_SESSION_RECV_BUFF_SIZE,
 		bool beNagle = true
 	) 
+#if defined(CONNECT_MOINTORING_SERVER)
+		: CLanClient(serverIP, serverPort, numOfIocpConcurrentThrd, numOfWorkerThreads, maxOfConnections, true, false),
+		//: CLanClient(serverIP, serverPort, 
+		//	numOfIocpConcurrentThrd, numOfWorkerThreads, maxOfConnections, 
+		//	true, false, tlsMemPoolDefaultUnitCnt, tlsMemPoolDefaultCapacity,
+		//	sessionSendBuffSize, sessionRecvBuffSize
+		//	), 
+#else
 		: CLanServer(serverIP, serverPort, numOfIocpConcurrentThrd, numOfWorkerThreads, maxOfConnections, true, false,
 			tlsMemPoolDefaultUnitCnt, tlsMemPoolDefaultCapacity,
 			sessionSendBuffSize, sessionRecvBuffSize
-			), 
+		),
+#endif
 		m_WorkerThreadCnt(0),
 		m_LimitAcceptance(maxOfConnections)
 #else
@@ -102,6 +122,26 @@ public:
 		InitializeSRWLock(&m_SessionAccountMapSrwLock);
 	}
 
+public:
+	bool Start() {
+		if (!CLanClient::Start()) {
+			return false;
+		}
+#if defined(CONNECT_MOINTORING_SERVER)
+		if (!ConnectLanServer("127.0.0.1", 10001, 1)) {
+			return false;
+		}
+#endif
+
+		return true;
+	}
+	void Stop() {
+#if defined(CONNECT_MOINTORING_SERVER)
+		DisconnectLanServer();
+#endif
+		CLanClient::Stop();
+	}
+
 private:
 	virtual bool OnWorkerThreadCreate(HANDLE thHnd) override;
 	virtual void OnWorkerThreadCreateDone() override;
@@ -111,6 +151,12 @@ private:
 	virtual void OnClientLeave(UINT64 sessionID) override;
 	virtual void OnRecv(UINT64 sessionID, JBuffer& recvBuff) override;
 	virtual void OnError() override;
+
+#if defined(CONNECT_MOINTORING_SERVER)
+	virtual void OnEnterJoinServer() override;
+	virtual void OnLeaveServer() override;
+	virtual void OnRecvFromCLanServer(JBuffer& recvBuff) override;
+#endif
 
 public:
 	virtual void ServerConsoleLog() override {
@@ -193,10 +239,31 @@ private:
 	//	- REQ_MESSAGE 패킷 처리
 	SRWLOCK m_SectorSrwLock[dfSECTOR_Y_MAX + 1][dfSECTOR_X_MAX + 1];
 
+#if defined(CONNECT_MOINTORING_SERVER)
+	// 업데이트 스레드 tps	
+	int							m_UpdateThreadTps = 0;
+	int							m_UpdateThreadTransaction = 0;
+
+	PerformanceCounter*			m_PerfCounter;
+	struct stMontData {
+		int dataValue = 0;
+		int timeStamp = 0;
+	};
+	std::map<BYTE, stMontData>	m_MontDataMap;
+
+	HANDLE						m_PerfCountThreadFunc;
+	bool						m_PerfCountStop = false;
+#endif
+
 private:
 	// Process Thread Working Function
 	static UINT __stdcall ProcessThreadFunc(void* arg);
 	void ProcessMessage(UINT64 sessionID, size_t msgCnt);
+
+#if defined(CONNECT_MOINTORING_SERVER)
+	static UINT __stdcall PerformanceCountFunc(void* arg);
+	void SendPerfCountMsg();
+#endif
 
 	void Proc_REQ_LOGIN(UINT64 sessionID, MSG_PACKET_CS_CHAT_REQ_LOGIN& body);
 	void Send_RES_LOGIN(UINT64 sessionID, BYTE STATUS, INT64 AccountNo);
