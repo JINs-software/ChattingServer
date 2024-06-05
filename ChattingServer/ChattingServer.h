@@ -67,16 +67,22 @@ public:
 	ChattingServer(const char* serverIP, uint16 serverPort,
 		DWORD numOfIocpConcurrentThrd, uint16 numOfWorkerThreads, uint16 maxOfConnections,
 		size_t tlsMemPoolDefaultUnitCnt = CHAT_TLS_MEM_POOL_DEFAULT_UNIT_CNT, size_t tlsMemPoolDefaultCapacity = CHAT_TLS_MEM_POOL_DEFAULT_UNIT_CAPACITY,
+#if defined(LOCKFREE_SEND_QUEUE)
+		uint32 sessionRecvBuffSize = CHAT_SERV_SESSION_RECV_BUFF_SIZE,
+#else
 		uint32 sessionSendBuffSize = CHAT_SERV_SESSION_SEND_BUFF_SIZE, uint32 sessionRecvBuffSize = CHAT_SERV_SESSION_RECV_BUFF_SIZE,
+#endif
 		bool beNagle = true
 	) 
 #if defined(CONNECT_MOINTORING_SERVER)
-		: CLanClient(serverIP, serverPort, numOfIocpConcurrentThrd, numOfWorkerThreads, maxOfConnections, true, false),
-		//: CLanClient(serverIP, serverPort, 
-		//	numOfIocpConcurrentThrd, numOfWorkerThreads, maxOfConnections, 
-		//	true, false, tlsMemPoolDefaultUnitCnt, tlsMemPoolDefaultCapacity,
-		//	sessionSendBuffSize, sessionRecvBuffSize
-		//	), 
+		: CLanClient(serverIP, serverPort, numOfIocpConcurrentThrd, numOfWorkerThreads, maxOfConnections, true, false,
+			tlsMemPoolDefaultUnitCnt, tlsMemPoolDefaultCapacity,
+#if defined(LOCKFREE_SEND_QUEUE)
+			sessionRecvBuffSize
+#else
+			sessionSendBuffSize, sessionRecvBuffSize
+#endif
+		),
 #else
 		: CLanServer(serverIP, serverPort, numOfIocpConcurrentThrd, numOfWorkerThreads, maxOfConnections, true, false,
 			tlsMemPoolDefaultUnitCnt, tlsMemPoolDefaultCapacity,
