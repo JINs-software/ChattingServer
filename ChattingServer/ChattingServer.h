@@ -16,6 +16,8 @@
 #include <set>
 #include <unordered_map>
 
+#include "LockFreeQueue.h"
+
 #if defined(CONNECT_MOINTORING_SERVER)
 class ChattingServer : public CLanClient
 #else
@@ -103,14 +105,25 @@ public:
 		m_DeletedSendPacketIdx = -1;
 		m_DeletedSendPacketLog.resize(USHRT_MAX + 1);
 #endif
-#if defined(dfPROCESSING_MODE_SESSIONQ_RECV_INFO_EVENT)
+
+#if defined(dfLOCKFREE_QUEUE_SYNCHRONIZATION)
+#if defined(dfPROCESSING_MODE_THREAD_RECV_INFO_QUEUE_POLLING)
+		m_TlsRecvQueueIdx = TlsAlloc();
+		m_TlsRecvQueueVec.resize(IOCP_WORKER_THREAD_CNT);
+#endif
+#else
+#if defined(dfPROCESSING_MODE_THREAD_RECV_INFO_QUEUE_EVENT)
 		m_RecvEventTlsIndex = TlsAlloc();
-#elif defined(dfPROCESSING_MODE_SESSIONQ_POLLING)
+#elif defined(dfPROCESSING_MODE_THREAD_RECV_INFO_QUEUE_POLLING)
 		m_TlsRecvQueueIdx = TlsAlloc();
 		m_TlsRecvQueueLockIdx = TlsAlloc();
 		m_TlsRecvQueueVec.resize(IOCP_WORKER_THREAD_CNT);
 #endif
+#endif
+
+#if !defined(dfPROCESSING_MODE_THREAD_SINGLE_JOB_QUEUE_POLLING)
 		InitializeSRWLock(&m_SessionMessageqMapSrwLock);
+#endif
 
 		// SRWLOCK m_SectorSrwLock[dfSECTOR_Y_MAX + 1][dfSECTOR_X_MAX + 1];
 		for (WORD i = 0; i < dfSECTOR_Y_MAX + 1; i++) {
@@ -149,7 +162,11 @@ private:
 	virtual bool OnConnectionRequest(/*IP, Port*/) override;
 	virtual void OnClientJoin(UINT64 sessionID) override;
 	virtual void OnClientLeave(UINT64 sessionID) override;
+#if !defined(ON_RECV_BUFFERING)
 	virtual void OnRecv(UINT64 sessionID, JBuffer& recvBuff) override;
+#else 
+	virtual void OnRecv(UINT64 sessionID, std::queue<JBuffer>& bufferedQueue, size_t recvDataLen);
+#endif
 	virtual void OnError() override;
 
 #if defined(CONNECT_MOINTORING_SERVER)
@@ -160,14 +177,16 @@ private:
 
 public:
 	virtual void ServerConsoleLog() override {
-#if defined(dfPROCESSING_MODE_SESSIONQ_RECV_INFO_EVENT)
+#if defined(dfPROCESSING_MODE_THREAD_RECV_INFO_QUEUE_EVENT)
 		std::cout << "[thread recvInfo queue]" << std::endl;
 		for (auto recvq : m_ThreadEventRecvqMap) {
 			std::cout << "	size: " << recvq.second.size() << std::endl;
 		}
 #endif
 		std::cout << "[Login Wait Session] : " << m_LoginWaitSessions.size() << std::endl;
+#if defined(dfLOCKFREE_QUEUE_SYNCHRONIZATION) && defined(dfPROCESSING_MODE_THREAD_RECV_INFO_QUEUE_POLLING)
 		std::cout << "[Session Msg Queue Cnt] : " << m_SessionMessageQueueMap.size() << std::endl;
+#endif
 		std::cout << "[Account Map size] : " << m_SessionIdAccountMap.size() << std::endl;
 		int sectorCnt = 0;
 		for (int y = 0; y <= dfSECTOR_Y_MAX; y++) {
@@ -183,7 +202,31 @@ private:
 	// IOCP 작업자 스레드 갯수
 	UINT8	m_WorkerThreadCnt;
 
-#if defined(dfPROCESSING_MODE_SESSIONQ_RECV_INFO_EVENT)
+#if defined(dfLOCKFREE_QUEUE_SYNCHRONIZATION)
+#if defined(dfPROCESSING_MODE_THREAD_RECV_INFO_QUEUE_POLLING)
+	////////////////////////////////////////////////////////////////////////////////////
+	// 2. ThreadRecvInfoQueue(with Lock) + SessionMessageQueue(with Lock) + UpdateThread Polling
+	////////////////////////////////////////////////////////////////////////////////////
+	// IOCP 작업자 스레드의 RecvEvent Queue Info TlsIdx
+	DWORD																m_TlsRecvQueueIdx;					
+	std::vector<LockFreeQueue<stRecvInfo>*>								m_TlsRecvQueueVec;
+	inline int GetUpdateMsgPoolSize() {
+		int ret = 0;
+		for (int i = 0; i < m_TlsRecvQueueVec.size(); i++) {
+			ret += m_TlsRecvQueueVec[i]->GetSize();
+		}
+		return ret;
+	}
+#elif defined(dfPROCESSING_MODE_THREAD_SINGLE_JOB_QUEUE_POLLING)
+	inline int GetUpdateMsgPoolSize() {
+		return m_MessageLockFreeQueue.GetSize();
+	}
+#endif
+#else
+#if defined(dfPROCESSING_MODE_THREAD_RECV_INFO_QUEUE_EVENT)
+	////////////////////////////////////////////////////////////////////////////////////
+	// 1. ThreadRecvInfoQueue(with Lock) + SessionMessageQueue(with Lock) + Event Alert to UpdateThread
+	////////////////////////////////////////////////////////////////////////////////////
 	DWORD	m_RecvEventTlsIndex;
 	// IOCP 작업자 스레드의 수신 이벤트 배열
 	HANDLE	m_WorkerThreadRecvEvents[IOCP_WORKER_THREAD_CNT];
@@ -197,10 +240,21 @@ private:
 	// 임시 동기화 객체 (추후 락-프리 큐로 변경)
 	// 충돌 대상: 멀티-프로세싱(업데이트) 스레드 간
 	std::unordered_map<HANDLE, CRITICAL_SECTION*>		m_ThreadEventLockMap;
-#elif defined(dfPROCESSING_MODE_SESSIONQ_POLLING)
+#elif defined(dfPROCESSING_MODE_THREAD_RECV_INFO_QUEUE_POLLING)
+	////////////////////////////////////////////////////////////////////////////////////
+	// 2. ThreadRecvInfoQueue(with Lock) + SessionMessageQueue(with Lock) + UpdateThread Polling
+	////////////////////////////////////////////////////////////////////////////////////
 	DWORD												m_TlsRecvQueueIdx;					// IOCP 작업자 스레드의 RecvEvent Queue Info TlsIdx
 	DWORD												m_TlsRecvQueueLockIdx;				// IOCP 작업자 스레드의 RecvEvent Queue Lock TlsIdx
 	std::vector<std::pair<std::queue<stRecvInfo>*, CRITICAL_SECTION*>>	m_TlsRecvQueueVec;
+	inline int GetUpdateMsgPoolSize() {
+		int ret = 0;
+		for (int i = 0; i < m_TlsRecvQueueVec.size(); i++) {
+			ret += m_TlsRecvQueueVec[i].first->size();
+		}
+		return ret;
+	}
+#endif
 #endif
 
 	// 세션 별 자료구조
@@ -209,11 +263,20 @@ private:
 	// 충돌 대상: IOCP 작업자 스레드들과 프로세싱(업데이트) 스레드 간
 	std::mutex			m_LoginWaitSessionsMtx;
 
+#if defined(dfLOCKFREE_QUEUE_SYNCHRONIZATION)
+#if defined(dfPROCESSING_MODE_THREAD_RECV_INFO_QUEUE_POLLING)
+	std::unordered_map<UINT64, LockFreeQueue<JBuffer*>>		m_SessionMessageQueueMap;
+	SRWLOCK													m_SessionMessageqMapSrwLock;
+#else
+	LockFreeQueue<std::pair<UINT64, JBuffer*>>				m_MessageLockFreeQueue;
+#endif
+#else
 	std::unordered_map<UINT64, std::queue<JBuffer*>>		m_SessionMessageQueueMap;
-	SRWLOCK	m_SessionMessageqMapSrwLock;
 	// 임시 동기화 객체 (추후 락-프리 큐로 변경)
 	// 충돌 대상: IOCP 작업자 스레드(Enqueue)와 멀티-프로세싱(업데이트)(Dequeue) 스레드 간
+	SRWLOCK													m_SessionMessageqMapSrwLock;
 	std::unordered_map<UINT64, CRITICAL_SECTION*>			m_SessionMessageQueueLockMap; // 메시지 큐 별 동기화 객체
+#endif
 
 	std::unordered_map<UINT64, stAccoutInfo>				m_SessionIdAccountMap;
 	// SRWLOCK 동기화 객체
@@ -258,7 +321,11 @@ private:
 private:
 	// Process Thread Working Function
 	static UINT __stdcall ProcessThreadFunc(void* arg);
+#if defined(dfPROCESSING_MODE_THREAD_SINGLE_JOB_QUEUE_POLLING)
+	void ProcessMessage(UINT64 sessionID, JBuffer* msg);
+#else
 	void ProcessMessage(UINT64 sessionID, size_t msgCnt);
+#endif
 
 #if defined(CONNECT_MOINTORING_SERVER)
 	static UINT __stdcall PerformanceCountFunc(void* arg);
@@ -272,7 +339,6 @@ private:
 	void Proc_REQ_MESSAGE(UINT64 sessionID, MSG_PACKET_CS_CHAT_REQ_MESSAGE& body, BYTE* message);
 	void Proc_REQ_HEARTBEAT();
 	
-	void Proc_SessionRelease(UINT64 sessionID);
-	void Proc_SessionReleaseBeforeLogin(UINT64 sessionID);
+	void Proc_SessionRelease(UINT64 sessionID, bool beforeLogin = false);
 };
 

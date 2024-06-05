@@ -2,7 +2,7 @@
 
 #define CHAT_SERV_IP_ADDR_STR						"127.0.0.1"
 #define CHAT_SERV_PORT								6000
-#define CHAT_SERV_LIMIT_ACCEPTANCE					10000
+#define CHAT_SERV_LIMIT_ACCEPTANCE					18000
 
 #define CHAT_TLS_MEM_POOL_DEFAULT_UNIT_CNT			5000
 #define CHAT_TLS_MEM_POOL_DEFAULT_UNIT_CAPACITY		1000
@@ -20,18 +20,32 @@
 ////////////////////////////////////////////////////////
 //#define PLAYER_CREATE_RELEASE_LOG
 
+#define dfLOCKFREE_QUEUE_SYNCHRONIZATION
+#if defined(dfLOCKFREE_QUEUE_SYNCHRONIZATION)
+// 1. IOCP Worker Thread -> Session Msg Queue(LockFree) -> Processing Thread (Polling RecvInfo Queue)
+//						 -> RecvInfo Queue(LockFree)    ->	
+////////////////////////////////////////////////////////
+//#define dfPROCESSING_MODE_THREAD_RECV_INFO_QUEUE_POLLING
+// 2. IOCP Worker Threads -> Single LockFree Job Queuue -> Processing Thread (Polling Job Queue)
+//
+////////////////////////////////////////////////////////
+#define dfPROCESSING_MODE_THREAD_SINGLE_JOB_QUEUE_POLLING
+#else
 ////////////////////////////////////////////////////////
 // Processing(Update) Thread Mode
-// 1. IOCP Worker Thread -> Session Msg Queue -> Processing Thread
-//						 -> RecvInfo Queue    ->
+// 1. IOCP Worker Thread -> Session Msg Queue(with Lock) -> Processing Thread
+//						 -> RecvInfo Queue(with Lock)    ->
 //						 ======== Event =======>
+//#define dfPROCESSING_MODE_THREAD_RECV_INFO_QUEUE_EVENT
 
-// 2. IOCP Worker Thread -> Session Msg Queue -> Processing Thread
-//												 (Polling)
+// 2. IOCP Worker Thread -> Session Msg Queue(with Lock) -> Processing Thread (Polling RecvInfo Queue)
+//						 -> RecvInfo Queue(with Lock)    ->	
+//												 
 ////////////////////////////////////////////////////////
-//#define dfPROCESSING_MODE_SESSIONQ_RECV_INFO_EVENT
-#define dfPROCESSING_MODE_SESSIONQ_POLLING
-//#define	dfPROCESSING_MODE_
+//#define dfPROCESSING_MODE_THREAD_RECV_INFO_QUEUE_POLLING
+#endif
+
+
 
 ////////////////////////////////////////////////////////
 // Monitoring Server Connect
