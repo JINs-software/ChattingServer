@@ -709,9 +709,13 @@ void ChattingServer::ProcessMessage(UINT64 sessionID, JBuffer* msg) {
 		if (msg->GetUseSize() < sizeof(MSG_PACKET_CS_CHAT_REQ_LOGIN)) {
 			DebugBreak();
 		}
-		MSG_PACKET_CS_CHAT_REQ_LOGIN loginReqMsg;
-		(*msg) >> loginReqMsg;	// 복사 없이 내부 버퍼를 그대로 캐스팅하는 방법은??
-		Proc_REQ_LOGIN(sessionID, loginReqMsg);
+		//MSG_PACKET_CS_CHAT_REQ_LOGIN loginReqMsg;
+		//(*msg) >> loginReqMsg;	// 복사 없이 내부 버퍼를 그대로 캐스팅하는 방법은??
+		//Proc_REQ_LOGIN(sessionID, loginReqMsg);
+
+		// =>복사 생략
+		MSG_PACKET_CS_CHAT_REQ_LOGIN* loginReqMsg = (MSG_PACKET_CS_CHAT_REQ_LOGIN*)msg->GetDequeueBufferPtr();
+		Proc_REQ_LOGIN(sessionID, *loginReqMsg);
 	}
 	break;
 	case en_PACKET_CS_CHAT_REQ_SECTOR_MOVE:
@@ -719,9 +723,12 @@ void ChattingServer::ProcessMessage(UINT64 sessionID, JBuffer* msg) {
 		if (msg->GetUseSize() < sizeof(MSG_PACKET_CS_CHAT_REQ_SECTOR_MOVE)) {
 			DebugBreak();
 		}
-		MSG_PACKET_CS_CHAT_REQ_SECTOR_MOVE moveReqMsg;
-		(*msg) >> moveReqMsg;	// 복사 없이 내부 버퍼를 그대로 캐스팅하는 방법은??
-		Proc_REQ_SECTOR_MOVE(sessionID, moveReqMsg);
+		//MSG_PACKET_CS_CHAT_REQ_SECTOR_MOVE moveReqMsg;
+		//(*msg) >> moveReqMsg;	// 복사 없이 내부 버퍼를 그대로 캐스팅하는 방법은??
+		//Proc_REQ_SECTOR_MOVE(sessionID, moveReqMsg);
+
+		MSG_PACKET_CS_CHAT_REQ_SECTOR_MOVE* moveReqMsg = (MSG_PACKET_CS_CHAT_REQ_SECTOR_MOVE*)msg->GetDequeueBufferPtr();
+		Proc_REQ_SECTOR_MOVE(sessionID, *moveReqMsg);
 	}
 	break;
 	case en_PACKET_CS_CHAT_REQ_MESSAGE:
@@ -729,12 +736,17 @@ void ChattingServer::ProcessMessage(UINT64 sessionID, JBuffer* msg) {
 		if (msg->GetUseSize() < sizeof(MSG_PACKET_CS_CHAT_REQ_MESSAGE)) {
 			DebugBreak();
 		}
-		MSG_PACKET_CS_CHAT_REQ_MESSAGE chatReqMsg;
-		(*msg) >> chatReqMsg;	// 복사 없이 내부 버퍼를 그대로 캐스팅하는 방법은??
-		BYTE* message = new BYTE[chatReqMsg.MessageLen];
-		memcpy(message, msg->GetDequeueBufferPtr(), chatReqMsg.MessageLen);
-		Proc_REQ_MESSAGE(sessionID, chatReqMsg, message);
-		delete[] message;
+		//MSG_PACKET_CS_CHAT_REQ_MESSAGE chatReqMsg;
+		//(*msg) >> chatReqMsg;	// 복사 없이 내부 버퍼를 그대로 캐스팅하는 방법은??
+		//BYTE* message = new BYTE[chatReqMsg.MessageLen];
+		//memcpy(message, msg->GetDequeueBufferPtr(), chatReqMsg.MessageLen);
+		//Proc_REQ_MESSAGE(sessionID, chatReqMsg, message);
+		//delete[] message;
+
+		MSG_PACKET_CS_CHAT_REQ_MESSAGE* chatReqMsg = (MSG_PACKET_CS_CHAT_REQ_MESSAGE*)msg->GetDequeueBufferPtr();
+		msg->DirectMoveDequeueOffset(sizeof(MSG_PACKET_CS_CHAT_REQ_MESSAGE));
+		BYTE* chatMsg = msg->GetDequeueBufferPtr();
+		Proc_REQ_MESSAGE(sessionID, *chatReqMsg, chatMsg);
 	}
 	break;
 	case en_PACKET_CS_CHAT_REQ_HEARTBEAT:
@@ -1119,10 +1131,12 @@ void ChattingServer::Proc_REQ_SECTOR_MOVE(UINT64 sessionID, MSG_PACKET_CS_CHAT_R
 	ReleaseSRWLockShared(&m_SessionAccountMapSrwLock);
 	//std::cout << "기존 X: " << accountInfo.X << ", Y: " << accountInfo.Y << std::endl;
 	if (accountInfo.X >= 0 && accountInfo.X <= dfSECTOR_X_MAX && accountInfo.Y >= 0 && accountInfo.X <= dfSECTOR_Y_MAX) {
-		AcquireSRWLockExclusive(&m_SectorSrwLock[accountInfo.Y][accountInfo.X]);
+		//AcquireSRWLockExclusive(&m_SectorSrwLock[accountInfo.Y][accountInfo.X]);
+		// => 싱글 업데이트 스레드에서는 불필요
 		std::set<UINT64>& sector = m_SectorMap[accountInfo.Y][accountInfo.X];
 		sector.erase(sessionID);
-		ReleaseSRWLockExclusive(&m_SectorSrwLock[accountInfo.Y][accountInfo.X]);
+		//ReleaseSRWLockExclusive(&m_SectorSrwLock[accountInfo.Y][accountInfo.X]);
+		// => 싱글 업데이트 스레드에서는 불필요
 	}
 
 	if (body.SectorX < 0 || body.SectorX > dfSECTOR_X_MAX || body.SectorY < 0 || body.SectorY > dfSECTOR_Y_MAX) {
@@ -1246,7 +1260,8 @@ void ChattingServer::Proc_REQ_MESSAGE(UINT64 sessionID, MSG_PACKET_CS_CHAT_REQ_M
 				continue;
 			}
 
-			AcquireSRWLockShared(&m_SectorSrwLock[y][x]);
+			//AcquireSRWLockShared(&m_SectorSrwLock[y][x]);
+			// => 싱글 업데이트 스레드에서는 불필요
 			std::set<UINT64>& sector = m_SectorMap[y][x];
 			for (auto iter = sector.begin(); iter != sector.end(); iter++) {
 				// 예외 처리?
@@ -1287,7 +1302,8 @@ void ChattingServer::Proc_REQ_MESSAGE(UINT64 sessionID, MSG_PACKET_CS_CHAT_REQ_M
 				m_PlayerLog[logIdx].sessionID_dest = *iter;
 #endif
 			}
-			ReleaseSRWLockShared(&m_SectorSrwLock[y][x]);
+			//ReleaseSRWLockShared(&m_SectorSrwLock[y][x]);
+			// => 싱글 업데이트 스레드에서는 불필요
 		}
 	}
 	
@@ -1371,10 +1387,12 @@ void ChattingServer::Proc_SessionRelease(UINT64 sessionID, bool beforeLogin)
 		// account 및 섹터 자료구조 정리
 		//////////////////////////////////////////////////////////////
 		if (accountInfo.X >= 0 && accountInfo.X <= dfSECTOR_X_MAX && accountInfo.Y >= 0 && accountInfo.X <= dfSECTOR_Y_MAX) {
-			AcquireSRWLockExclusive(&m_SectorSrwLock[accountInfo.Y][accountInfo.X]);
+			//AcquireSRWLockExclusive(&m_SectorSrwLock[accountInfo.Y][accountInfo.X]);
+			// => 싱글 업데이트 스레드에서는 불필요
 			std::set<UINT64>& sector = m_SectorMap[accountInfo.Y][accountInfo.X];
 			sector.erase(sessionID);
-			ReleaseSRWLockExclusive(&m_SectorSrwLock[accountInfo.Y][accountInfo.X]);
+			//ReleaseSRWLockExclusive(&m_SectorSrwLock[accountInfo.Y][accountInfo.X]);
+			// => 싱글 업데이트 스레드에서는 불필요
 		}
 
 		AcquireSRWLockExclusive(&m_SessionAccountMapSrwLock);

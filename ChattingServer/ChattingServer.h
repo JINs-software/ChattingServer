@@ -125,12 +125,12 @@ public:
 		InitializeSRWLock(&m_SessionMessageqMapSrwLock);
 #endif
 
-		// SRWLOCK m_SectorSrwLock[dfSECTOR_Y_MAX + 1][dfSECTOR_X_MAX + 1];
-		for (WORD i = 0; i < dfSECTOR_Y_MAX + 1; i++) {
-			for (WORD j = 0; j < dfSECTOR_X_MAX + 1; j++) {
-				InitializeSRWLock(&m_SectorSrwLock[i][j]);
-			}
-		}
+		//for (WORD i = 0; i < dfSECTOR_Y_MAX + 1; i++) {
+		//	for (WORD j = 0; j < dfSECTOR_X_MAX + 1; j++) {
+		//		InitializeSRWLock(&m_SectorSrwLock[i][j]);
+		//	}
+		//}
+		// => 싱글 업데이트 스레드에서는 불필요
 
 		InitializeSRWLock(&m_SessionAccountMapSrwLock);
 	}
@@ -300,7 +300,9 @@ private:
 	//	- SESSION_RELEASE 처리
 	// AcquireSRWLockShared:
 	//	- REQ_MESSAGE 패킷 처리
-	SRWLOCK m_SectorSrwLock[dfSECTOR_Y_MAX + 1][dfSECTOR_X_MAX + 1];
+	
+	//SRWLOCK m_SectorSrwLock[dfSECTOR_Y_MAX + 1][dfSECTOR_X_MAX + 1];
+	// => 싱글 업데이트 스레드에서는 불필요
 
 #if defined(CONNECT_MOINTORING_SERVER)
 	// 업데이트 스레드 tps	
