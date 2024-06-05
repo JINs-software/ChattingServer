@@ -1275,7 +1275,7 @@ void ChattingServer::Proc_REQ_MESSAGE(UINT64 sessionID, MSG_PACKET_CS_CHAT_REQ_M
 #endif
 
 #if defined(ALLOC_BY_TLS_MEM_POOL)
-				AddRefSerialBuff(sendMessage, to_string(sessionID) + ", Forwaring Chat Msg to " + to_string(*iter));
+				AddRefSerialBuff(sendMessage);
 
 				if (!SendPacket(*iter, sendMessage)) {
 					FreeSerialBuff(sendMessage);
