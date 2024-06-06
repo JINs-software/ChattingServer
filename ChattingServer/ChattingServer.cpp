@@ -609,6 +609,10 @@ UINT __stdcall ChattingServer::ProcessThreadFunc(void* arg)
 													// AllocTlsMemPool()로 부터 반환된 인덱스는 IOCP 작업자 스레드 도입부에서 CLanServer 멤버에 저장되었다 가정
 #endif
 
+	if (!SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_HIGHEST)) {
+		DebugBreak();
+	}
+
 
 	while(true) {
 #if defined(dfLOCKFREE_QUEUE_SYNCHRONIZATION)
@@ -630,7 +634,7 @@ UINT __stdcall ChattingServer::ProcessThreadFunc(void* arg)
 #elif defined(dfPROCESSING_MODE_THREAD_SINGLE_JOB_QUEUE_POLLING)
 		if (server->m_MessageLockFreeQueue.GetSize() > 0) {
 			std::pair<UINT64, JBuffer*> jobMsg;
-			if (!server->m_MessageLockFreeQueue.Dequeue(jobMsg)) {
+			if (!server->m_MessageLockFreeQueue.Dequeue(jobMsg, true)) {
 				DebugBreak();
 			}
 			server->ProcessMessage(jobMsg.first, jobMsg.second);

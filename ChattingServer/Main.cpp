@@ -43,11 +43,13 @@ int main() {
 			}
 		}
 
-		clock_t now = clock();
-		if (now - ct > 100) {
-			chatserver.ConsoleLog();
-			ct = now;
-		}
+		//clock_t now = clock();
+		//if (now - ct > 100) {
+		//	chatserver.ConsoleLog();
+		//	ct = now;
+		//}
+
+		Sleep(5000);
 	}
 
 	chatserver.Stop();
