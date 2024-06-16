@@ -904,10 +904,15 @@ UINT __stdcall ChattingServer::PerformanceCountFunc(void* arg)
 			if (chatserver->ConnectLanServer(MONT_SERVER_IP, MONT_SERVER_PORT)) {
 				chatserver->m_ConnMontServerFlag = true;
 
-				JBuffer* loginMsg = chatserver->AllocSerialSendBuff(sizeof(WORD) + sizeof(int));
+				JBuffer* loginMsg = chatserver->AllocSerialSendBuff(sizeof(WORD) + sizeof(int), MONT_SERVER_PROTOCOL_CODE, chatserver->GetRandomKey());
 				*loginMsg << (WORD)en_PACKET_SS_MONITOR_LOGIN;
 				*loginMsg << (int)dfSERVER_CHAT_SERVER;
-				if (!chatserver->SendPacketToCLanServer(loginMsg)) {
+
+				stMSG_HDR* hdr = (stMSG_HDR*)loginMsg->GetBeginBufferPtr();
+				BYTE* payloads = loginMsg->GetBufferPtr(sizeof(stMSG_HDR));
+				chatserver->Encode(hdr->randKey, hdr->len, hdr->checkSum, payloads, MONT_SERVER_PACKET_KEY);
+
+				if (!chatserver->SendPacketToCLanServer(loginMsg, true)) {
 					chatserver->FreeSerialBuff(loginMsg);
 				}
 			}
@@ -958,17 +963,19 @@ void ChattingServer::SendPerfCountMsg()
 		stMontData& montData = iter.second;
 
 		stMSG_HDR* hdr = perfMsg->DirectReserve<stMSG_HDR>();
-		hdr->code = dfPACKET_CODE;
+		hdr->code = MONT_SERVER_PROTOCOL_CODE;
 		hdr->len = sizeof(WORD) + sizeof(BYTE) + sizeof(int) + sizeof(int);
-		hdr->randKey = (BYTE)(-1);
+		hdr->randKey = GetRandomKey();
 		stMSG_MONITOR_DATA_UPDATE* body = perfMsg->DirectReserve<stMSG_MONITOR_DATA_UPDATE>();
 		body->Type = en_PACKET_SS_MONITOR_DATA_UPDATE;
 		body->DataType = dataType;
 		body->DataValue = montData.dataValue;
 		body->TimeStamp = montData.timeStamp;
+
+		Encode(hdr->randKey, hdr->len, hdr->checkSum, (BYTE*)body, MONT_SERVER_PACKET_KEY);
 	}
 
-	SendPacketToCLanServer(perfMsg);
+	SendPacketToCLanServer(perfMsg, true);
 }
 #endif
 
