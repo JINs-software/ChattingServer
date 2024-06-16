@@ -3,12 +3,9 @@
 #include <time.h>
 
 int main() {
-	//ChattingServer(const char* serverIP, UINT16 serverPort,
-	//	DWORD numOfIocpConcurrentThrd, UINT16 numOfWorkerThreads,
-	//	UINT16 maxOfConnections, bool beNagle = true,
-	//	UINT32 sessionSendBuffSize = CHAT_SERV_SESSION_SEND_BUFF_SIZE, UINT32 sessionRecvBuffSize = CHAT_SERV_SESSION_RECV_BUFF_SIZE
-	//)
-	ChattingServer chatserver(NULL, 12001, 0, IOCP_WORKER_THREAD_CNT, CHAT_SERV_LIMIT_ACCEPTANCE);
+	ChattingServer chatserver(NULL, CHAT_SERV_PORT, 0, IOCP_WORKER_THREAD_CNT, CHAT_SERV_LIMIT_ACCEPTANCE,
+		CHAT_TLS_MEM_POOL_DEFAULT_UNIT_CNT, CHAT_TLS_MEM_POOL_DEFAULT_UNIT_CAPACITY, CHAT_SERIAL_BUFFER_SIZE
+	);
 
 	chatserver.Start();
 
@@ -41,15 +38,25 @@ int main() {
 #endif
 				DebugBreak();
 			}
+			else if (ctr == 'd' || ctr == 'D') {
+				DebugBreak();
+			}
 		}
 
-		//clock_t now = clock();
-		//if (now - ct > 100) {
-		//	chatserver.ConsoleLog();
-		//	ct = now;
-		//}
 
-		Sleep(5000);
+		chatserver.ConsoleLog();
+
+		//system("cls");   // 콘솔 창 지우기
+		//
+		//static size_t logCnt = 0;
+		//
+		//static COORD coord;
+		//coord.X = 0;
+		//coord.Y = 0;
+		//SetConsoleCursorPosition(GetStdHandle(STD_OUTPUT_HANDLE), coord);
+		//std::cout << "m_UpdateWorkerBalance: " << chatserver.m_UpdateWorkerBalance << std::endl;
+
+		Sleep(1000);
 	}
 
 	chatserver.Stop();

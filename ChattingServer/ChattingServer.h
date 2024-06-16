@@ -24,49 +24,15 @@ class ChattingServer : public CLanClient
 class ChattingServer : public CLanServer
 #endif
 {
-#if defined(PLAYER_CREATE_RELEASE_LOG)
-	struct stPlayerLog {
-		bool joinFlag = false;
-		bool leaveFlag = false;
-		bool recvFlag = false;
-		bool procMsgFlag = false;
-		uint64 sessionID = 0;
-		uint64 sessinIdIndex;
-		int64 accountNo;
-		en_PACKET_TYPE packetID;
-		bool sendSuccess = false;
-		uint64 sessionID_dest;
-
-		uint64 uint0;
-
-		void Init() {
-			memset(this, 0, sizeof(stPlayerLog));
-		}
-	};
-	USHORT m_PlayerLogIdx;
-	std::vector<stPlayerLog> m_PlayerLog;
-	stPlayerLog& GetPlayerLog() {
-		USHORT playerLogIdx = InterlockedIncrement16((short*)&m_PlayerLogIdx);
-		m_PlayerLog[playerLogIdx].Init();
-
-		return m_PlayerLog[playerLogIdx];
-	}
-
-	struct stDeletedSendPacket {
-		WORD type;
-		INT64 accountNo;
-	};
-	USHORT m_DeletedSendPacketIdx;
-	std::vector<stDeletedSendPacket> m_DeletedSendPacketLog;
-
 public:
-	void PlayerFileLog();
-#endif
-public:
+	/////////////////////////////////////////////////////////////////////////////////////
+	// ChattingServer 생성자
+	/////////////////////////////////////////////////////////////////////////////////////
 #if defined(ALLOC_BY_TLS_MEM_POOL)
 	ChattingServer(const char* serverIP, uint16 serverPort,
 		DWORD numOfIocpConcurrentThrd, uint16 numOfWorkerThreads, uint16 maxOfConnections,
-		size_t tlsMemPoolDefaultUnitCnt = CHAT_TLS_MEM_POOL_DEFAULT_UNIT_CNT, size_t tlsMemPoolDefaultCapacity = CHAT_TLS_MEM_POOL_DEFAULT_UNIT_CAPACITY,
+		size_t tlsMemPoolDefaultUnitCnt = 0, size_t tlsMemPoolDefaultCapacity = 0,
+		UINT serialBufferSize = CHAT_SERIAL_BUFFER_SIZE,
 #if defined(LOCKFREE_SEND_QUEUE)
 		uint32 sessionRecvBuffSize = CHAT_SERV_SESSION_RECV_BUFF_SIZE,
 #else
@@ -75,8 +41,9 @@ public:
 		bool beNagle = true
 	) 
 #if defined(CONNECT_MOINTORING_SERVER)
-		: CLanClient(serverIP, serverPort, numOfIocpConcurrentThrd, numOfWorkerThreads, maxOfConnections, true, false,
-			tlsMemPoolDefaultUnitCnt, tlsMemPoolDefaultCapacity,
+		: CLanClient(serverIP, serverPort, numOfIocpConcurrentThrd, numOfWorkerThreads, maxOfConnections, 
+			tlsMemPoolDefaultUnitCnt, tlsMemPoolDefaultCapacity, true, false,
+			serialBufferSize,
 #if defined(LOCKFREE_SEND_QUEUE)
 			sessionRecvBuffSize
 #else
@@ -84,11 +51,17 @@ public:
 #endif
 		),
 #else
-		: CLanServer(serverIP, serverPort, numOfIocpConcurrentThrd, numOfWorkerThreads, maxOfConnections, true, false,
-			tlsMemPoolDefaultUnitCnt, tlsMemPoolDefaultCapacity,
+		: CLanServer(serverIP, serverPort, numOfIocpConcurrentThrd, numOfWorkerThreads, maxOfConnections, 
+			tlsMemPoolDefaultUnitCnt, tlsMemPoolDefaultCapacity, true, false,
+			serialBufferSize,
+#if defined(LOCKFREE_SEND_QUEUE)
+			sessionRecvBuffSize
+#else
 			sessionSendBuffSize, sessionRecvBuffSize
+#endif
 		),
 #endif
+		m_StopFlag(false),
 		m_WorkerThreadCnt(0),
 		m_LimitAcceptance(maxOfConnections)
 #else
@@ -130,44 +103,62 @@ public:
 #if !defined(dfPROCESSING_MODE_THREAD_SINGLE_JOB_QUEUE_POLLING)
 		InitializeSRWLock(&m_SessionMessageqMapSrwLock);
 #endif
-
-		//for (WORD i = 0; i < dfSECTOR_Y_MAX + 1; i++) {
-		//	for (WORD j = 0; j < dfSECTOR_X_MAX + 1; j++) {
-		//		InitializeSRWLock(&m_SectorSrwLock[i][j]);
-		//	}
-		//}
-		// => 싱글 업데이트 스레드에서는 불필요
-
-		InitializeSRWLock(&m_SessionAccountMapSrwLock);
+	}
+	/////////////////////////////////////////////////////////////////////////////////////
+	// ChattingServer 소멸자, Stop 호출 미호출 시 Stop 함수 호출
+	/////////////////////////////////////////////////////////////////////////////////////
+	~ChattingServer() {
+		if (!m_StopFlag) {
+			Stop();
+		}
 	}
 
 public:
+	/////////////////////////////////////////////////////////////////////////////////////
+	// ChattingServer::Start
+	// - 계정 객체 풀 생성, CHAT_SERV_LIMIT_ACCEPTANCE: 최대 수용량
+	// - 모니터링 카운터 생성
+	/////////////////////////////////////////////////////////////////////////////////////
 	bool Start() {
+		m_AccountPool = new AccountObjectPool(CHAT_SERV_LIMIT_ACCEPTANCE);
+#if defined(CONNECT_MOINTORING_SERVER)
+		m_PerfCounter = new PerformanceCounter();
+
 		if (!CLanClient::Start()) {
 			return false;
 		}
-#if defined(CONNECT_MOINTORING_SERVER)
-		if (!ConnectLanServer("127.0.0.1", 10001, 1)) {
+#else
+		if (!CLanServer::Start()) {
 			return false;
 		}
 #endif
 
 		return true;
 	}
+	/////////////////////////////////////////////////////////////////////////////////////
+	// ChattingServer::Stop
+	// - 계정 객체 풀 생성, CHAT_SERV_LIMIT_ACCEPTANCE: 최대 수용량
+	// - 모니터링 카운터 생성
+	/////////////////////////////////////////////////////////////////////////////////////
 	void Stop() {
+		m_StopFlag = true;
 #if defined(CONNECT_MOINTORING_SERVER)
 		DisconnectLanServer();
-#endif
 		CLanClient::Stop();
+#else
+		CLanServer::Start();
+#endif
 	}
 
 private:
 	virtual bool OnWorkerThreadCreate(HANDLE thHnd) override;
-	virtual void OnWorkerThreadCreateDone() override;
+	virtual void OnWorkerThreadCreateDone() override;	// -> 프로세싱(업데이트) 스레드 생성
+														// -> 모니터링 연동 및 카운팅 스레드 생성
+
 	virtual void OnWorkerThreadStart() override;
 	virtual bool OnConnectionRequest(/*IP, Port*/) override;
-	virtual void OnClientJoin(UINT64 sessionID) override;
-	virtual void OnClientLeave(UINT64 sessionID) override;
+	virtual void OnClientJoin(UINT64 sessionID) override;	// -> 세션 접속 메시지 업데이트 메시지 큐에 큐잉
+	virtual void OnClientLeave(UINT64 sessionID) override;	// -> 세션 해제 메시지 업데이트 메시지 큐에 큐잉 
 #if !defined(ON_RECV_BUFFERING)
 	virtual void OnRecv(UINT64 sessionID, JBuffer& recvBuff) override;
 #else 
@@ -183,27 +174,15 @@ private:
 
 public:
 	virtual void ServerConsoleLog() override {
-#if defined(dfPROCESSING_MODE_THREAD_RECV_INFO_QUEUE_EVENT)
-		std::cout << "[thread recvInfo queue]" << std::endl;
-		for (auto recvq : m_ThreadEventRecvqMap) {
-			std::cout << "	size: " << recvq.second.size() << std::endl;
-		}
-#endif
-		std::cout << "[Login Wait Session] : " << m_LoginWaitSessions.size() << std::endl;
-#if defined(dfLOCKFREE_QUEUE_SYNCHRONIZATION) && defined(dfPROCESSING_MODE_THREAD_RECV_INFO_QUEUE_POLLING)
-		std::cout << "[Session Msg Queue Cnt] : " << m_SessionMessageQueueMap.size() << std::endl;
-#endif
-		std::cout << "[Account Map size] : " << m_SessionIdAccountMap.size() << std::endl;
-		int sectorCnt = 0;
-		for (int y = 0; y <= dfSECTOR_Y_MAX; y++) {
-			for (int x = 0; x <= dfSECTOR_X_MAX; x++) {
-				sectorCnt += m_SectorMap[y][x].size();
-			}
-		}
-		std::cout << "[Sector Member Cnt] : " << sectorCnt << std::endl;
+		std::cout << "[Login] Login Wait Session Cnt  : " << m_LoginWaitSessions.size() << std::endl;
+		std::cout << "[Login] Login Session Cnt       : " << m_SessionIdAccountMap.size() << std::endl;
+		std::cout << "[Account] Allocated Account Cnt : " << m_AccountPool->GetAllocatedObjectCnt() << std::endl;
 	}
 
+
 private:
+	bool	m_StopFlag;
+
 	size_t	m_LimitAcceptance;
 	// IOCP 작업자 스레드 갯수
 	UINT8	m_WorkerThreadCnt;
@@ -263,17 +242,18 @@ private:
 #endif
 #endif
 
-	// 세션 별 자료구조
+	//// 세션 별 자료구조
 	std::set<UINT64>	m_LoginWaitSessions;
-	// std::mutex 동기화 객체
-	// 충돌 대상: IOCP 작업자 스레드들과 프로세싱(업데이트) 스레드 간
-	std::mutex			m_LoginWaitSessionsMtx;
+	//// std::mutex 동기화 객체
+	//// 충돌 대상: IOCP 작업자 스레드들과 프로세싱(업데이트) 스레드 간
+	//std::mutex			m_LoginWaitSessionsMtx;
+	// => 세션 접속 메시지 생성 -> 업데이트 메시지 큐
 
 #if defined(dfLOCKFREE_QUEUE_SYNCHRONIZATION)
 #if defined(dfPROCESSING_MODE_THREAD_RECV_INFO_QUEUE_POLLING)
 	std::unordered_map<UINT64, LockFreeQueue<JBuffer*>>		m_SessionMessageQueueMap;
 	SRWLOCK													m_SessionMessageqMapSrwLock;
-#else
+#elif defined(dfPROCESSING_MODE_THREAD_SINGLE_JOB_QUEUE_POLLING)
 	LockFreeQueue<std::pair<UINT64, JBuffer*>>				m_MessageLockFreeQueue;
 #endif
 #else
@@ -284,7 +264,8 @@ private:
 	std::unordered_map<UINT64, CRITICAL_SECTION*>			m_SessionMessageQueueLockMap; // 메시지 큐 별 동기화 객체
 #endif
 
-	std::unordered_map<UINT64, stAccoutInfo>				m_SessionIdAccountMap;
+	AccountObjectPool*										m_AccountPool;
+	std::unordered_map<UINT64, stAccoutInfo*>				m_SessionIdAccountMap;
 	// SRWLOCK 동기화 객체
 	// 충돌 대상: 멀티-프로세싱(업데이트) 스레드 간
 	// AcquireSRWLockExclusive:
@@ -294,11 +275,12 @@ private:
 	//	- REQ_SECTOR_MOVE 처리
 	//	- REQ_MESSAGE 패킷 처리
 	//	- SESSION_RELEASE 처리(계정 정보 참조)
-	SRWLOCK m_SessionAccountMapSrwLock;
+	//SRWLOCK m_SessionAccountMapSrwLock;
 
 	// Process Thread
 	HANDLE m_ProcessThreadHnd;
-	std::set<UINT64> m_SectorMap[dfSECTOR_Y_MAX+1][dfSECTOR_X_MAX+1];
+	//std::set<UINT64> m_SectorMap[dfSECTOR_Y_MAX+1][dfSECTOR_X_MAX+1];
+	std::map<UINT64, stAccoutInfo*> m_SectorMap[dfSECTOR_Y_MAX + 1][dfSECTOR_X_MAX + 1];
 	// SRWLOCK 동기화 객체
 	// 충돌 대상: 멀티-프로세싱(업데이트) 스레드 간
 	// AcquireSRWLockExclusive:
@@ -311,6 +293,7 @@ private:
 	// => 싱글 업데이트 스레드에서는 불필요
 
 #if defined(CONNECT_MOINTORING_SERVER)
+public:
 	// 업데이트 스레드 tps	
 	int							m_UpdateThreadTps = 0;
 	int							m_UpdateThreadTransaction = 0;
@@ -323,7 +306,10 @@ private:
 	std::map<BYTE, stMontData>	m_MontDataMap;
 
 	HANDLE						m_PerfCountThreadFunc;
+	bool						m_ConnMontServerFlag = false;
+	bool						m_OnJoinMontServer = false;
 	bool						m_PerfCountStop = false;
+
 #endif
 
 private:
@@ -347,6 +333,46 @@ private:
 	void Proc_REQ_MESSAGE(UINT64 sessionID, MSG_PACKET_CS_CHAT_REQ_MESSAGE& body, BYTE* message);
 	void Proc_REQ_HEARTBEAT();
 	
-	void Proc_SessionRelease(UINT64 sessionID, bool beforeLogin = false);
+	void Proc_SessionJoin(UINT64 sessionID);
+	void Proc_SessionRelease(UINT64 sessionID);
+
+#if defined(PLAYER_CREATE_RELEASE_LOG)
+	struct stPlayerLog {
+		bool joinFlag = false;
+		bool leaveFlag = false;
+		bool recvFlag = false;
+		bool procMsgFlag = false;
+		uint64 sessionID = 0;
+		uint64 sessinIdIndex;
+		int64 accountNo;
+		en_PACKET_TYPE packetID;
+		bool sendSuccess = false;
+		uint64 sessionID_dest;
+
+		uint64 uint0;
+
+		void Init() {
+			memset(this, 0, sizeof(stPlayerLog));
+		}
+	};
+	USHORT m_PlayerLogIdx;
+	std::vector<stPlayerLog> m_PlayerLog;
+	stPlayerLog& GetPlayerLog() {
+		USHORT playerLogIdx = InterlockedIncrement16((short*)&m_PlayerLogIdx);
+		m_PlayerLog[playerLogIdx].Init();
+
+		return m_PlayerLog[playerLogIdx];
+	}
+
+	struct stDeletedSendPacket {
+		WORD type;
+		INT64 accountNo;
+	};
+	USHORT m_DeletedSendPacketIdx;
+	std::vector<stDeletedSendPacket> m_DeletedSendPacketLog;
+
+public:
+	void PlayerFileLog();
+#endif
 };
 

@@ -1,14 +1,21 @@
 #pragma once
 
+#define CHATSERVER_ASSERT
+
 #define CHAT_SERV_IP_ADDR_STR						"127.0.0.1"
 #define CHAT_SERV_PORT								6000
 #define CHAT_SERV_LIMIT_ACCEPTANCE					18000
 
-#define CHAT_TLS_MEM_POOL_DEFAULT_UNIT_CNT			5000
-#define CHAT_TLS_MEM_POOL_DEFAULT_UNIT_CAPACITY		5000
+#define MONT_SERVER_IP								"127.0.0.1"
+#define MONT_SERVER_PORT							12121
 
-#define CHAT_SERV_SESSION_SEND_BUFF_SIZE			30000
-#define CHAT_SERV_SESSION_RECV_BUFF_SIZE			30000
+#define CHAT_TLS_MEM_POOL_DEFAULT_UNIT_CNT			0
+#define CHAT_TLS_MEM_POOL_DEFAULT_UNIT_CAPACITY		1000
+
+#define CHAT_SERIAL_BUFFER_SIZE						100
+
+//#define CHAT_SERV_SESSION_SEND_BUFF_SIZE			10000
+#define CHAT_SERV_SESSION_RECV_BUFF_SIZE			1000
 
 #define IOCP_WORKER_THREAD_CNT						2
 
@@ -45,18 +52,14 @@
 //#define dfPROCESSING_MODE_THREAD_RECV_INFO_QUEUE_POLLING
 #endif
 
-
-
 ////////////////////////////////////////////////////////
 // Monitoring Server Connect
 ////////////////////////////////////////////////////////
 #define CONNECT_MOINTORING_SERVER
 #if defined(CONNECT_MOINTORING_SERVER)
-#define CHAT_SERVER_MEMORY_USAGE_QUERY "CHATING_SERVER_MEMORY_USAGE"
 
 enum en_MONT_PACKET_TYPE
 {
-
 	//------------------------------------------------------
 	// Monitor Server Protocol
 	//------------------------------------------------------
@@ -117,6 +120,7 @@ enum en_PACKET_SS_MONITOR_DATA_UPDATE {
 	dfMONITOR_DATA_TYPE_CHAT_UPDATE_TPS = 35,		// 채팅서버 UPDATE 스레드 초당 초리 횟수
 	dfMONITOR_DATA_TYPE_CHAT_PACKET_POOL = 36,		// 채팅서버 패킷풀 사용량
 	dfMONITOR_DATA_TYPE_CHAT_UPDATEMSG_POOL = 37,	// 채팅서버 UPDATE MSG 풀 사용량
+	dfMONITOR_DATA_TYPE_CHAT_UPDATE_WORKER_CPU = 38,	// 채팅서버 UPDATE MSG 풀 사용량
 };
 enum en_SERVER_TYPE {
 	dfSERVER_LOGIN_SERVER = 0,
