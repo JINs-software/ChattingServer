@@ -128,7 +128,7 @@ struct MSG_PACKET_CS_CHAT_REQ_LOGIN {
 	INT64 AccountNo;
 	WCHAR ID[20];			// null 포함
 	WCHAR Nickname[20];		// null 포함
-	char sessinKey[64];		// 인증 토큰
+	char sessionKey[64];		// 인증 토큰
 };
 struct MSG_PACKET_CS_CHAT_RES_LOGIN {
 	WORD	Type;

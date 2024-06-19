@@ -2,8 +2,10 @@
 
 #define CHATSERVER_ASSERT
 
+#define TOKEN_AUTH_TO_REDIS_MODE
+
 #define CHAT_SERV_IP_ADDR_STR						"127.0.0.1"
-#define CHAT_SERV_PORT								6000
+#define CHAT_SERV_PORT								10930
 #define CHAT_SERV_LIMIT_ACCEPTANCE					18000
 
 #define MONT_SERVER_IP								"127.0.0.1"

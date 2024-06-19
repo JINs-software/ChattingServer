@@ -18,6 +18,12 @@
 
 #include "LockFreeQueue.h"
 
+#if defined(TOKEN_AUTH_TO_REDIS_MODE)
+namespace RedisCpp {
+	class CRedisConn;
+}
+#endif
+
 #if defined(CONNECT_MOINTORING_SERVER)
 class ChattingServer : public CLanClient
 #else
@@ -62,8 +68,10 @@ public:
 		),
 #endif
 		m_StopFlag(false),
+		m_ServerStart(false),
 		m_WorkerThreadCnt(0),
-		m_LimitAcceptance(maxOfConnections)
+		m_LimitAcceptance(maxOfConnections),
+		m_RedisConn(NULL)
 #else
 	ChattingServer(const char* serverIP, uint16 serverPort,
 		DWORD numOfIocpConcurrentThrd, uint16 numOfWorkerThreads, uint16 maxOfConnections,
@@ -119,36 +127,13 @@ public:
 	// - 계정 객체 풀 생성, CHAT_SERV_LIMIT_ACCEPTANCE: 최대 수용량
 	// - 모니터링 카운터 생성
 	/////////////////////////////////////////////////////////////////////////////////////
-	bool Start() {
-		m_AccountPool = new AccountObjectPool(CHAT_SERV_LIMIT_ACCEPTANCE);
-#if defined(CONNECT_MOINTORING_SERVER)
-		m_PerfCounter = new PerformanceCounter();
-
-		if (!CLanClient::Start()) {
-			return false;
-		}
-#else
-		if (!CLanServer::Start()) {
-			return false;
-		}
-#endif
-
-		return true;
-	}
+	bool Start();
 	/////////////////////////////////////////////////////////////////////////////////////
 	// ChattingServer::Stop
 	// - 계정 객체 풀 생성, CHAT_SERV_LIMIT_ACCEPTANCE: 최대 수용량
 	// - 모니터링 카운터 생성
 	/////////////////////////////////////////////////////////////////////////////////////
-	void Stop() {
-		m_StopFlag = true;
-#if defined(CONNECT_MOINTORING_SERVER)
-		DisconnectLanServer();
-		CLanClient::Stop();
-#else
-		CLanServer::Start();
-#endif
-	}
+	void Stop();
 
 private:
 	virtual bool OnWorkerThreadCreate(HANDLE thHnd) override;
@@ -182,9 +167,8 @@ public:
 
 private:
 	bool	m_StopFlag;
-
+	bool	m_ServerStart;
 	size_t	m_LimitAcceptance;
-	// IOCP 작업자 스레드 갯수
 	UINT8	m_WorkerThreadCnt;
 
 #if defined(dfLOCKFREE_QUEUE_SYNCHRONIZATION)
@@ -291,6 +275,10 @@ private:
 	
 	//SRWLOCK m_SectorSrwLock[dfSECTOR_Y_MAX + 1][dfSECTOR_X_MAX + 1];
 	// => 싱글 업데이트 스레드에서는 불필요
+
+#if defined(TOKEN_AUTH_TO_REDIS_MODE)
+	RedisCpp::CRedisConn* m_RedisConn;
+#endif
 
 #if defined(CONNECT_MOINTORING_SERVER)
 public:

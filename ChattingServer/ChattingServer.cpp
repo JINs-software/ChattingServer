@@ -1,6 +1,46 @@
 #include "ChattingServer.h"
 #include <fstream>
 
+#if defined(TOKEN_AUTH_TO_REDIS_MODE)
+#include "CRedisConn.h"
+#endif
+
+bool ChattingServer::Start() {
+#if defined(TOKEN_AUTH_TO_REDIS_MODE)
+	m_RedisConn = new RedisCpp::CRedisConn();
+	if (m_RedisConn == NULL) {
+		return false;
+	}
+#endif
+
+	m_AccountPool = new AccountObjectPool(CHAT_SERV_LIMIT_ACCEPTANCE);
+#if defined(CONNECT_MOINTORING_SERVER)
+	m_PerfCounter = new PerformanceCounter();
+
+	if (!CLanClient::Start()) {
+		return false;
+	}
+#else
+	if (!CLanServer::Start()) {
+		return false;
+	}
+#endif
+	m_ServerStart = true;
+	return true;
+}
+
+void ChattingServer::Stop() {
+	m_StopFlag = true;
+	if (m_ServerStart) {
+#if defined(CONNECT_MOINTORING_SERVER)
+		DisconnectLanServer();
+		CLanClient::Stop();
+#else
+		CLanServer::Stop();
+#endif
+	}
+}
+
 bool ChattingServer::OnWorkerThreadCreate(HANDLE thHnd)
 {
 	if (m_WorkerThreadCnt >= IOCP_WORKER_THREAD_CNT) {
@@ -998,6 +1038,18 @@ void ChattingServer::Proc_REQ_LOGIN(UINT64 sessionID, MSG_PACKET_CS_CHAT_REQ_LOG
 	}
 
 	if (!releaseBeforeLogin) {
+#if defined(TOKEN_AUTH_TO_REDIS_MODE)
+		std::string accountNoStr = to_string(body.AccountNo);
+		std::string sessionKey = "";
+		if (!m_RedisConn->get(accountNoStr, sessionKey)) {
+			DebugBreak();
+		}
+
+		if (body.sessionKey != sessionKey) {
+			DebugBreak();
+		}
+#endif
+
 
 		stAccoutInfo* accountInfo = m_AccountPool->Alloc();
 		if (accountInfo == NULL) {
