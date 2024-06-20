@@ -7,9 +7,26 @@
 
 bool ChattingServer::Start() {
 #if defined(TOKEN_AUTH_TO_REDIS_MODE)
-	m_RedisConn = new RedisCpp::CRedisConn();
-	if (m_RedisConn == NULL) {
-		return false;
+	// Redis 커넥션
+	bool firstConn = true;
+	for (uint16 i = 0; i < m_NumOfIOCPWorkerThreadConf; i++) {
+		RedisCpp::CRedisConn* redisConn = new RedisCpp::CRedisConn();	// 형식 지정자가 필요합니다.
+		if (redisConn == NULL) {
+			std::cout << "[LoginServer::Start] new RedisCpp::CRedisConn() return NULL" << std::endl;
+			return false;
+		}
+
+		if (!redisConn->connect(TOKEN_AUTH_REDIS_IP, TOKEN_AUTH_REDIS_PORT)) {
+			std::cout << "[ChattingServer::Start] new RedisCpp::CRedisConn(); return NULL" << std::endl;
+			return false;
+		}
+
+		if (!redisConn->ping()) {
+			std::cout << "[ChattingServer::Start] m_RedisConn->connect(..) return FALSE" << std::endl;
+			return false;
+		}
+
+		m_RedisConnPool.Enqueue(redisConn);
 	}
 #endif
 
@@ -22,6 +39,7 @@ bool ChattingServer::Start() {
 	}
 #else
 	if (!CLanServer::Start()) {
+		std::cout << "[ChattingServer::Start] CLanServer::Start() return FALSE" << std::endl;
 		return false;
 	}
 #endif
@@ -37,6 +55,16 @@ void ChattingServer::Stop() {
 		CLanClient::Stop();
 #else
 		CLanServer::Stop();
+#endif
+
+#if defined(TOKEN_AUTH_TO_REDIS_MODE)
+		while (m_RedisConnPool.GetSize() > 0) {
+			RedisCpp::CRedisConn* redisConn = NULL;
+			m_RedisConnPool.Dequeue(redisConn);
+			if (redisConn != NULL) {
+				delete redisConn;
+			}
+		}
 #endif
 	}
 }
@@ -1038,18 +1066,43 @@ void ChattingServer::Proc_REQ_LOGIN(UINT64 sessionID, MSG_PACKET_CS_CHAT_REQ_LOG
 	}
 
 	if (!releaseBeforeLogin) {
+		BYTE loginStatus = 1;
+
 #if defined(TOKEN_AUTH_TO_REDIS_MODE)
 		std::string accountNoStr = to_string(body.AccountNo);
 		std::string sessionKey = "";
-		if (!m_RedisConn->get(accountNoStr, sessionKey)) {
-			DebugBreak();
+
+		RedisCpp::CRedisConn* redisConn = NULL;
+		while (true) {	// redisConnect 획득까지 폴링
+			m_RedisConnPool.Dequeue(redisConn);
+			if (redisConn != NULL) {
+				break;
+			}
 		}
 
-		if (body.sessionKey != sessionKey) {
+		if (!redisConn->get(accountNoStr, sessionKey)) {
+			loginStatus = 0;
+			DebugBreak();
+		}
+		else {
+			uint32_t ret;
+			if (!redisConn->del(accountNoStr, ret)) {
+				loginStatus = 0;
+				DebugBreak();
+			}
+		}
+		m_RedisConnPool.Enqueue(redisConn);
+
+		if (memcmp(body.sessionKey, sessionKey.c_str(), sizeof(body.sessionKey)) != 0) {
+			loginStatus = 0;
 			DebugBreak();
 		}
 #endif
 
+		if (loginStatus == 0) {
+			Send_RES_LOGIN(sessionID, loginStatus, body.AccountNo);
+			return;
+		}
 
 		stAccoutInfo* accountInfo = m_AccountPool->Alloc();
 		if (accountInfo == NULL) {
@@ -1070,8 +1123,8 @@ void ChattingServer::Proc_REQ_LOGIN(UINT64 sessionID, MSG_PACKET_CS_CHAT_REQ_LOG
 		m_PlayerLog[playerLogIdx].sessinIdIndex = (uint16)sessionIdx;
 		m_PlayerLog[playerLogIdx].accountNo = accountInfo.AccountNo;
 #endif
-
-		Send_RES_LOGIN(sessionID, true, accountInfo->AccountNo);
+		loginStatus = 1;
+		Send_RES_LOGIN(sessionID, loginStatus, accountInfo->AccountNo);
 
 #if defined(SESSION_LOG)
 		InterlockedIncrement64(&m_TotalLoginCnt);

@@ -2,14 +2,9 @@
 
 #define CHATSERVER_ASSERT
 
-#define TOKEN_AUTH_TO_REDIS_MODE
-
 #define CHAT_SERV_IP_ADDR_STR						"127.0.0.1"
-#define CHAT_SERV_PORT								10930
+#define CHAT_SERV_PORT								12130
 #define CHAT_SERV_LIMIT_ACCEPTANCE					18000
-
-#define MONT_SERVER_IP								"127.0.0.1"
-#define MONT_SERVER_PORT							12121
 
 #define MONT_SERVER_PROTOCOL_CODE					109
 #define MONT_SERVER_PACKET_KEY						30
@@ -60,8 +55,20 @@
 ////////////////////////////////////////////////////////
 // Monitoring Server Connect
 ////////////////////////////////////////////////////////
+#define TOKEN_AUTH_TO_REDIS_MODE
+#if defined(TOKEN_AUTH_TO_REDIS_MODE)
+#define TOKEN_AUTH_REDIS_IP							"127.0.0.1"
+#define TOKEN_AUTH_REDIS_PORT						6379							
+#endif
+
+////////////////////////////////////////////////////////
+// Monitoring Server Connect
+////////////////////////////////////////////////////////
 #define CONNECT_MOINTORING_SERVER
 #if defined(CONNECT_MOINTORING_SERVER)
+
+#define MONT_SERVER_IP								"127.0.0.1"
+#define MONT_SERVER_PORT							12121
 
 enum en_MONT_PACKET_TYPE
 {

@@ -69,9 +69,9 @@ public:
 #endif
 		m_StopFlag(false),
 		m_ServerStart(false),
+		m_NumOfIOCPWorkerThreadConf(numOfWorkerThreads),
 		m_WorkerThreadCnt(0),
-		m_LimitAcceptance(maxOfConnections),
-		m_RedisConn(NULL)
+		m_LimitAcceptance(maxOfConnections)
 #else
 	ChattingServer(const char* serverIP, uint16 serverPort,
 		DWORD numOfIocpConcurrentThrd, uint16 numOfWorkerThreads, uint16 maxOfConnections,
@@ -166,6 +166,7 @@ public:
 
 
 private:
+	bool	m_NumOfIOCPWorkerThreadConf;
 	bool	m_StopFlag;
 	bool	m_ServerStart;
 	size_t	m_LimitAcceptance;
@@ -277,7 +278,8 @@ private:
 	// => 싱글 업데이트 스레드에서는 불필요
 
 #if defined(TOKEN_AUTH_TO_REDIS_MODE)
-	RedisCpp::CRedisConn* m_RedisConn;
+	//RedisCpp::CRedisConn* m_RedisConn;
+	LockFreeQueue<RedisCpp::CRedisConn*>	m_RedisConnPool;
 #endif
 
 #if defined(CONNECT_MOINTORING_SERVER)

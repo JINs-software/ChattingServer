@@ -7,7 +7,9 @@ int main() {
 		CHAT_TLS_MEM_POOL_DEFAULT_UNIT_CNT, CHAT_TLS_MEM_POOL_DEFAULT_UNIT_CAPACITY, CHAT_SERIAL_BUFFER_SIZE
 	);
 
-	chatserver.Start();
+	if (!chatserver.Start()) {
+		return 0;
+	}
 
 	char ctr;
 	clock_t ct = 0;
