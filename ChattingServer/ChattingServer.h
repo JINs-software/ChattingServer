@@ -44,17 +44,20 @@ public:
 #else
 		uint32 sessionSendBuffSize = CHAT_SERV_SESSION_SEND_BUFF_SIZE, uint32 sessionRecvBuffSize = CHAT_SERV_SESSION_RECV_BUFF_SIZE,
 #endif
-		bool beNagle = true
+		BYTE protocolCode = dfPACKET_CODE, BYTE packetKey = dfPACKET_KEY,
+		bool recvBufferingMode = false
 	) 
 #if defined(CONNECT_MOINTORING_SERVER)
 		: CLanClient(serverIP, serverPort, numOfIocpConcurrentThrd, numOfWorkerThreads, maxOfConnections, 
 			tlsMemPoolDefaultUnitCnt, tlsMemPoolDefaultCapacity, true, false,
 			serialBufferSize,
 #if defined(LOCKFREE_SEND_QUEUE)
-			sessionRecvBuffSize
+			sessionRecvBuffSize,
 #else
-			sessionSendBuffSize, sessionRecvBuffSize
+			sessionSendBuffSize, sessionRecvBuffSize,
 #endif
+			protocolCode, packetKey,
+			recvBufferingMode
 		),
 #else
 		: CLanServer(serverIP, serverPort, numOfIocpConcurrentThrd, numOfWorkerThreads, maxOfConnections, 
@@ -144,11 +147,9 @@ private:
 	virtual bool OnConnectionRequest(/*IP, Port*/) override;
 	virtual void OnClientJoin(UINT64 sessionID) override;	// -> 세션 접속 메시지 업데이트 메시지 큐에 큐잉
 	virtual void OnClientLeave(UINT64 sessionID) override;	// -> 세션 해제 메시지 업데이트 메시지 큐에 큐잉 
-#if !defined(ON_RECV_BUFFERING)
 	virtual void OnRecv(UINT64 sessionID, JBuffer& recvBuff) override;
-#else 
-	virtual void OnRecv(UINT64 sessionID, std::queue<JBuffer>& bufferedQueue, size_t recvDataLen);
-#endif
+	virtual void OnRecv(UINT64 sessionID, JSerialBuffer& recvBuff) override;
+
 	virtual void OnError() override;
 
 #if defined(CONNECT_MOINTORING_SERVER)

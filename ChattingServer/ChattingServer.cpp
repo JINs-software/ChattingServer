@@ -312,137 +312,99 @@ void ChattingServer::OnClientLeave(uint64 sessionID)
 #endif
 }
 
-#if defined(ON_RECV_BUFFERING)
-void ChattingServer::OnRecv(UINT64 sessionID, std::queue<JBuffer>& bufferedQueue, size_t recvDataLen)
+void ChattingServer::OnRecv(UINT64 sessionID, JSerialBuffer& recvBuff)
 {
 	LONG recvMsgCnt = 0;
 
-	while (!bufferedQueue.empty()) {
-		JBuffer recvBuff = bufferedQueue.front(); 
-		bufferedQueue.pop();
+	while (recvBuff.GetUseSize() > 0) {			/// ????		// [TO DO] msgHdr.len까지만 디큐잉 하는 것으로 변경
+		WORD type;
+		recvBuff.Peek((BYTE*)&type, sizeof(type));
 
-		while (recvBuff.GetUseSize() > 0) {			/// ????		// [TO DO] msgHdr.len까지만 디큐잉 하는 것으로 변경
-			WORD type;
-			recvBuff.Peek(&type);
-
-			JBuffer* message = AllocSerialBuff();
-			if (message == NULL) {
-				DebugBreak();
-			}
-
-			switch (type)
-			{
-			case en_PACKET_CS_CHAT_REQ_LOGIN:
-			{
-				recvBuff.Dequeue(message->GetDequeueBufferPtr(), sizeof(MSG_PACKET_CS_CHAT_REQ_LOGIN));
-				message->DirectMoveEnqueueOffset(sizeof(MSG_PACKET_CS_CHAT_REQ_LOGIN));
-			}
-			break;
-			case en_PACKET_CS_CHAT_REQ_SECTOR_MOVE:
-			{
-				recvBuff.Dequeue(message->GetDequeueBufferPtr(), sizeof(MSG_PACKET_CS_CHAT_REQ_SECTOR_MOVE));
-				message->DirectMoveEnqueueOffset(sizeof(MSG_PACKET_CS_CHAT_REQ_SECTOR_MOVE));
-			}
-			break;
-			case en_PACKET_CS_CHAT_REQ_MESSAGE:
-			{
-				WORD messageLen;
-				recvBuff.Peek(sizeof(WORD) + sizeof(INT64), (BYTE*)&messageLen, sizeof(WORD));
-				recvBuff.Dequeue(message->GetDequeueBufferPtr(), sizeof(MSG_PACKET_CS_CHAT_REQ_MESSAGE) + messageLen);
-				message->DirectMoveEnqueueOffset(sizeof(MSG_PACKET_CS_CHAT_REQ_MESSAGE) + messageLen);
-			}
-			break;
-			case en_PACKET_CS_CHAT_REQ_HEARTBEAT:
-			{
-				DebugBreak();
-			}
-			break;
-			default:
-				DebugBreak();
-				break;
-			}
-
-#if defined(dfLOCKFREE_QUEUE_SYNCHRONIZATION)
-#if defined(dfPROCESSING_MODE_THREAD_RECV_INFO_QUEUE_POLLING)
-			// .. 세션 별 메시지 큐 삽입
-			// 메시지 큐 GET
-			AcquireSRWLockShared(&m_SessionMessageqMapSrwLock);
-
-			auto msgQueueIter = m_SessionMessageQueueMap.find(sessionID);
-			if (msgQueueIter == m_SessionMessageQueueMap.end()) {
-				DebugBreak();
-			}
-			LockFreeQueue<JBuffer*>& sessionMsgQ = msgQueueIter->second;
-			ReleaseSRWLockShared(&m_SessionMessageqMapSrwLock);
-
-			sessionMsgQ.Enqueue(message);
-#elif defined(dfPROCESSING_MODE_THREAD_SINGLE_JOB_QUEUE_POLLING)
-			m_MessageLockFreeQueue.Enqueue({ sessionID, message });
-#endif
+		JBuffer* message = AllocSerialBuff();
+		if (message == NULL) {
+#if defined(CHATSERVER_ASSERT)
+			DebugBreak();
 #else
-			// .. 세션 별 메시지 큐 삽입
-			// 메시지 큐 & 메시지 큐 동기화 객체 GET
-			AcquireSRWLockShared(&m_SessionMessageqMapSrwLock);
-
-			auto msgQueueIter = m_SessionMessageQueueMap.find(sessionID);
-			auto msgQueueLockIter = m_SessionMessageQueueLockMap.find(sessionID);
-			if (msgQueueIter == m_SessionMessageQueueMap.end() || msgQueueLockIter == m_SessionMessageQueueLockMap.end()) {
-				DebugBreak();
-			}
-			std::queue<JBuffer*>& sessionMsgQ = msgQueueIter->second;
-			CRITICAL_SECTION* lockPtr = msgQueueLockIter->second;
-			ReleaseSRWLockShared(&m_SessionMessageqMapSrwLock);
-
-			EnterCriticalSection(lockPtr);								// 임시 동기화 객체
-			sessionMsgQ.push(message);
-			LeaveCriticalSection(lockPtr);								// 임시 동기화 객체
+			return;
 #endif
-
-			recvMsgCnt++;
 		}
-	}
 
-	if (recvMsgCnt > 0) {
-//#if defined(CALCULATE_TRANSACTION_PER_SECOND)
-//		InterlockedAdd(&m_CalcTpsItems[RECV_TRANSACTION], recvMsgCnt);
-//		InterlockedAdd(&m_TotalTransaction[RECV_TRANSACTION], recvMsgCnt);
-//#endif
-		//=> 채팅 서버는 송수신 TPS 측정 X
+		switch (type)
+		{
+		case en_PACKET_CS_CHAT_REQ_LOGIN:
+		{
+			recvBuff.Dequeue(message->GetDequeueBufferPtr(), sizeof(MSG_PACKET_CS_CHAT_REQ_LOGIN));
+			message->DirectMoveEnqueueOffset(sizeof(MSG_PACKET_CS_CHAT_REQ_LOGIN));
+		}
+		break;
+		case en_PACKET_CS_CHAT_REQ_SECTOR_MOVE:
+		{
+			recvBuff.Dequeue(message->GetDequeueBufferPtr(), sizeof(MSG_PACKET_CS_CHAT_REQ_SECTOR_MOVE));
+			message->DirectMoveEnqueueOffset(sizeof(MSG_PACKET_CS_CHAT_REQ_SECTOR_MOVE));
+		}
+		break;
+		case en_PACKET_CS_CHAT_REQ_MESSAGE:
+		{
+			MSG_PACKET_CS_CHAT_REQ_MESSAGE reqMsg;
+			recvBuff.Peek((BYTE*)&reqMsg, sizeof(reqMsg));
+			recvBuff.Dequeue(message->GetDequeueBufferPtr(), sizeof(MSG_PACKET_CS_CHAT_REQ_MESSAGE) + reqMsg.MessageLen);
+			message->DirectMoveEnqueueOffset(sizeof(MSG_PACKET_CS_CHAT_REQ_MESSAGE) + reqMsg.MessageLen);
+		}
+		break;
+#if defined(CHATSERVER_ASSERT)
+		case en_PACKET_CS_CHAT_REQ_HEARTBEAT:
+		{
+			DebugBreak();
+		}
+		break;
+#endif
+		default:
+#if defined(CHATSERVER_ASSERT)
+			DebugBreak();
+#endif
+			break;
+		}
 
 #if defined(dfLOCKFREE_QUEUE_SYNCHRONIZATION)
 #if defined(dfPROCESSING_MODE_THREAD_RECV_INFO_QUEUE_POLLING)
-		stRecvInfo recvInfo;
-		recvInfo.sessionID = sessionID;
-		recvInfo.recvMsgCnt = recvMsgCnt;
-		LockFreeQueue<stRecvInfo>* recvInfoQ = (LockFreeQueue<stRecvInfo>*)TlsGetValue(m_TlsRecvQueueIdx);
-		recvInfoQ->Enqueue(recvInfo);
+		// .. 세션 별 메시지 큐 삽입
+		// 메시지 큐 GET
+		AcquireSRWLockShared(&m_SessionMessageqMapSrwLock);
+
+		auto msgQueueIter = m_SessionMessageQueueMap.find(sessionID);
+		if (msgQueueIter == m_SessionMessageQueueMap.end()) {
+			DebugBreak();
+		}
+		LockFreeQueue<JBuffer*>& sessionMsgQ = msgQueueIter->second;
+		ReleaseSRWLockShared(&m_SessionMessageqMapSrwLock);
+
+		sessionMsgQ.Enqueue(message);
+#elif defined(dfPROCESSING_MODE_THREAD_SINGLE_JOB_QUEUE_POLLING)
+		m_MessageLockFreeQueue.Enqueue({ sessionID, message });
 #endif
 #else
-#if defined(dfPROCESSING_MODE_THREAD_RECV_INFO_QUEUE_EVENT)
-		stRecvInfo recvInfo;
-		recvInfo.sessionID = sessionID;
-		recvInfo.recvMsgCnt = recvMsgCnt;
-		HANDLE recvEvent = (HANDLE)TlsGetValue(m_RecvEventTlsIndex);
-		std::queue<stRecvInfo>& recvInfoQ = m_ThreadEventRecvqMap[recvEvent];
-		CRITICAL_SECTION* lockPtr = m_ThreadEventLockMap[recvEvent];			// 임시 동기화 객체
-		EnterCriticalSection(lockPtr);											// 임시 동기화 객체
-		recvInfoQ.push(recvInfo);
-		LeaveCriticalSection(lockPtr);											// 임시 동기화 객체
-		SetEvent(recvEvent);
-#elif defined(dfPROCESSING_MODE_THREAD_RECV_INFO_QUEUE_POLLING)
-		stRecvInfo recvInfo;
-		recvInfo.sessionID = sessionID;
-		recvInfo.recvMsgCnt = recvMsgCnt;
-		std::queue<stRecvInfo>* recvInfoQ = (std::queue<stRecvInfo>*)TlsGetValue(m_TlsRecvQueueIdx);
-		CRITICAL_SECTION* lockPtr = (CRITICAL_SECTION*)TlsGetValue(m_TlsRecvQueueLockIdx);
-		EnterCriticalSection(lockPtr);							// 임시 동기화 객체
-		recvInfoQ->push(recvInfo);
-		LeaveCriticalSection(lockPtr);							// 임시 동기화 객체
+		// .. 세션 별 메시지 큐 삽입
+		// 메시지 큐 & 메시지 큐 동기화 객체 GET
+		AcquireSRWLockShared(&m_SessionMessageqMapSrwLock);
+
+		auto msgQueueIter = m_SessionMessageQueueMap.find(sessionID);
+		auto msgQueueLockIter = m_SessionMessageQueueLockMap.find(sessionID);
+		if (msgQueueIter == m_SessionMessageQueueMap.end() || msgQueueLockIter == m_SessionMessageQueueLockMap.end()) {
+			DebugBreak();
+		}
+		std::queue<JBuffer*>& sessionMsgQ = msgQueueIter->second;
+		CRITICAL_SECTION* lockPtr = msgQueueLockIter->second;
+		ReleaseSRWLockShared(&m_SessionMessageqMapSrwLock);
+
+		EnterCriticalSection(lockPtr);								// 임시 동기화 객체
+		sessionMsgQ.push(message);
+		LeaveCriticalSection(lockPtr);								// 임시 동기화 객체
 #endif
-#endif
+		recvMsgCnt++;
 	}
+
+
 }
-#else
 void ChattingServer::OnRecv(uint64 sessionID, JBuffer& recvBuff)
 {	
 #if defined(PLAYER_CREATE_RELEASE_LOG)
@@ -582,7 +544,6 @@ void ChattingServer::OnRecv(uint64 sessionID, JBuffer& recvBuff)
 #endif
 	}
 }
-#endif
 
 void ChattingServer::OnError()
 {

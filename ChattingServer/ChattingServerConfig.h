@@ -55,7 +55,7 @@
 ////////////////////////////////////////////////////////
 // Monitoring Server Connect
 ////////////////////////////////////////////////////////
-#define TOKEN_AUTH_TO_REDIS_MODE
+//#define TOKEN_AUTH_TO_REDIS_MODE
 #if defined(TOKEN_AUTH_TO_REDIS_MODE)
 #define TOKEN_AUTH_REDIS_IP							"127.0.0.1"
 #define TOKEN_AUTH_REDIS_PORT						6379							
