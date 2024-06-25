@@ -145,7 +145,7 @@ private:
 
 	virtual void OnWorkerThreadStart() override;
 	virtual bool OnConnectionRequest(/*IP, Port*/) override;
-	virtual void OnClientJoin(UINT64 sessionID) override;	// -> 세션 접속 메시지 업데이트 메시지 큐에 큐잉
+	virtual void OnClientJoin(UINT64 sessionID, const SOCKADDR_IN& clientSockAddr) override;	// -> 세션 접속 메시지 업데이트 메시지 큐에 큐잉
 	virtual void OnClientLeave(UINT64 sessionID) override;	// -> 세션 해제 메시지 업데이트 메시지 큐에 큐잉 
 	virtual void OnRecv(UINT64 sessionID, JBuffer& recvBuff) override;
 	virtual void OnRecv(UINT64 sessionID, JSerialBuffer& recvBuff) override;
@@ -160,9 +160,45 @@ private:
 
 public:
 	virtual void ServerConsoleLog() override {
-		std::cout << "[Login] Login Wait Session Cnt  : " << m_LoginWaitSessions.size() << std::endl;
-		std::cout << "[Login] Login Session Cnt       : " << m_SessionIdAccountMap.size() << std::endl;
-		std::cout << "[Account] Allocated Account Cnt : " << m_AccountPool->GetAllocatedObjectCnt() << std::endl;
+		std::cout << "<Chatting Server>" << std::endl;
+		std::cout << "[Token Auth] Token Auth Wait Session    : " << m_LoginWaitSessions.size() << std::endl;
+		std::cout << "[Token Auth] Token Auth Success Session : " << m_SessionIdAccountMap.size() << std::endl;
+		std::cout << "[Account] Number of Allocated Account   : " << m_AccountPool->GetAllocatedObjectCnt() << std::endl;
+
+		std::cout << "[Proc Delay: Total] Total Delay Ms   : " << m_DelayCounters[enTotal].m_TotalTransactionDelayMs << std::endl;
+		std::cout << "[Proc Delay: Total] Average Delay Ms : " << m_DelayCounters[enTotal].m_AvrTransactionDelayMs << std::endl;
+		std::cout << "[Proc Delay: Total] Max Delay Ms     : " << m_DelayCounters[enTotal].m_MaxTransactionDelayMs << std::endl;
+		std::cout << "[Proc Delay: Total] Min Delay Ms     : " << m_DelayCounters[enTotal].m_MinTransactionDelayMs << std::endl;
+
+		std::cout << "[Proc Delay: Join] Total Transaction : " << m_DelayCounters[enJoin].m_TotalTransactionCount<< std::endl;
+		std::cout << "[Proc Delay: Join] Total Delay Ms    : " << m_DelayCounters[enJoin].m_TotalTransactionDelayMs << std::endl;
+		std::cout << "[Proc Delay: Join] Average Delay Ms  : " << m_DelayCounters[enJoin].m_AvrTransactionDelayMs << std::endl;
+		std::cout << "[Proc Delay: Join] Max Delay Ms      : " << m_DelayCounters[enJoin].m_MaxTransactionDelayMs << std::endl;
+		std::cout << "[Proc Delay: Join] Min Delay Ms      : " << m_DelayCounters[enJoin].m_MinTransactionDelayMs << std::endl;
+
+		std::cout << "[Proc Delay: Release] Total Transaction : " << m_DelayCounters[enRelease].m_TotalTransactionCount << std::endl;
+		std::cout << "[Proc Delay: Relase] Total Delay Ms     : " << m_DelayCounters[enRelease].m_TotalTransactionDelayMs << std::endl;
+		std::cout << "[Proc Delay: Relase] Average Delay Ms   : " << m_DelayCounters[enRelease].m_AvrTransactionDelayMs << std::endl;
+		std::cout << "[Proc Delay: Relase] Max Delay Ms       : " << m_DelayCounters[enRelease].m_MaxTransactionDelayMs << std::endl;
+		std::cout << "[Proc Delay: Relase] Min Delay Ms       : " << m_DelayCounters[enRelease].m_MinTransactionDelayMs << std::endl;
+
+		std::cout << "[Proc Delay: Login] Total Transaction   : " << m_DelayCounters[enLogin].m_TotalTransactionCount << std::endl;
+		std::cout << "[Proc Delay: Login] Total Delay Ms      : " << m_DelayCounters[enLogin].m_TotalTransactionDelayMs << std::endl;
+		std::cout << "[Proc Delay: Login] Average Delay Ms    : " << m_DelayCounters[enLogin].m_AvrTransactionDelayMs << std::endl;
+		std::cout << "[Proc Delay: Login] Max Delay Ms        : " << m_DelayCounters[enLogin].m_MaxTransactionDelayMs << std::endl;
+		std::cout << "[Proc Delay: Login] Min Delay Ms        : " << m_DelayCounters[enLogin].m_MinTransactionDelayMs << std::endl;
+
+		std::cout << "[Proc Delay: Move] Total Transaction  : " << m_DelayCounters[enMove].m_TotalTransactionCount << std::endl;
+		std::cout << "[Proc Delay: Move] Total Delay Ms     : " << m_DelayCounters[enMove].m_TotalTransactionDelayMs << std::endl;
+		std::cout << "[Proc Delay: Move] Average Delay Ms   : " << m_DelayCounters[enMove].m_AvrTransactionDelayMs << std::endl;
+		std::cout << "[Proc Delay: Move] Max Delay Ms       : " << m_DelayCounters[enMove].m_MaxTransactionDelayMs << std::endl;
+		std::cout << "[Proc Delay: Move] Min Delay Ms       : " << m_DelayCounters[enMove].m_MinTransactionDelayMs << std::endl;
+
+		std::cout << "[Proc Delay: Message] Total Transaction  : " << m_DelayCounters[enMessage].m_TotalTransactionCount << std::endl;
+		std::cout << "[Proc Delay: Message] Total Delay Ms     : " << m_DelayCounters[enMessage].m_TotalTransactionDelayMs << std::endl;
+		std::cout << "[Proc Delay: Message] Average Delay Ms   : " << m_DelayCounters[enMessage].m_AvrTransactionDelayMs << std::endl;
+		std::cout << "[Proc Delay: Message] Max Delay Ms       : " << m_DelayCounters[enMessage].m_MaxTransactionDelayMs << std::endl;
+		std::cout << "[Proc Delay: Message] Min Delay Ms       : " << m_DelayCounters[enMessage].m_MinTransactionDelayMs << std::endl;
 	}
 
 
@@ -172,6 +208,38 @@ private:
 	bool	m_ServerStart;
 	size_t	m_LimitAcceptance;
 	UINT8	m_WorkerThreadCnt;
+
+#if defined(DELAY_TIME_CHECK)
+	struct DeleyCounter {
+		uint32  m_TotalTransactionCount = 0;
+		uint32	m_TotalTransactionDelayMs = 0;
+		clock_t	m_MaxTransactionDelayMs = 0;
+		clock_t	m_MinTransactionDelayMs = LONG_MAX;
+		clock_t	m_AvrTransactionDelayMs = 0;
+
+		std::mutex mtx;
+
+		inline void Set(clock_t delay) {
+			std::lock_guard<std::mutex> lockGuard(mtx);
+			m_TotalTransactionCount++;
+			m_TotalTransactionDelayMs += delay;
+			m_AvrTransactionDelayMs = m_TotalTransactionDelayMs / m_TotalTransactionCount;
+			m_MaxTransactionDelayMs = max(m_MaxTransactionDelayMs, delay);
+			m_MinTransactionDelayMs = min(m_MinTransactionDelayMs, delay);
+		}
+	};
+	enum DelayCountItem {
+		enTotal,
+		enJoin,
+		enRelease,
+		enLogin,
+		enMove,
+		enMessage
+	};
+
+	DeleyCounter m_DelayCounters[6];
+#endif
+	
 
 #if defined(dfLOCKFREE_QUEUE_SYNCHRONIZATION)
 #if defined(dfPROCESSING_MODE_THREAD_RECV_INFO_QUEUE_POLLING)
@@ -240,7 +308,15 @@ private:
 	std::unordered_map<UINT64, LockFreeQueue<JBuffer*>>		m_SessionMessageQueueMap;
 	SRWLOCK													m_SessionMessageqMapSrwLock;
 #elif defined(dfPROCESSING_MODE_THREAD_SINGLE_JOB_QUEUE_POLLING)
+#if defined(DELAY_TIME_CHECK)
+	struct SessionTimeStamp {
+		UINT64	sessionID;
+		clock_t timeStamp;
+	};
+	LockFreeQueue<std::pair<SessionTimeStamp, JBuffer*>>				m_MessageLockFreeQueue;
+#else
 	LockFreeQueue<std::pair<UINT64, JBuffer*>>				m_MessageLockFreeQueue;
+#endif
 #endif
 #else
 	std::unordered_map<UINT64, std::queue<JBuffer*>>		m_SessionMessageQueueMap;

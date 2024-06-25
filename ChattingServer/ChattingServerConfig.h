@@ -1,10 +1,13 @@
 #pragma once
 
 #define CHATSERVER_ASSERT
+#define DELAY_TIME_CHECK
 
-#define CHAT_SERV_IP_ADDR_STR						"127.0.0.1"
+#define CHAT_SERV_IP_ADDR_STR						NULL
 #define CHAT_SERV_PORT								12130
 #define CHAT_SERV_LIMIT_ACCEPTANCE					18000
+
+#define IOCP_WORKER_THREAD_CNT						2
 
 #define MONT_SERVER_PROTOCOL_CODE					109
 #define MONT_SERVER_PACKET_KEY						30
@@ -17,7 +20,7 @@
 //#define CHAT_SERV_SESSION_SEND_BUFF_SIZE			10000
 #define CHAT_SERV_SESSION_RECV_BUFF_SIZE			1000
 
-#define IOCP_WORKER_THREAD_CNT						2
+#define RECV_BUFFERING_MODE							FALSE
 
 #define dfSECTOR_X_MAX								50
 #define dfSECTOR_Y_MAX								50
@@ -55,9 +58,9 @@
 ////////////////////////////////////////////////////////
 // Monitoring Server Connect
 ////////////////////////////////////////////////////////
-//#define TOKEN_AUTH_TO_REDIS_MODE
+#define TOKEN_AUTH_TO_REDIS_MODE
 #if defined(TOKEN_AUTH_TO_REDIS_MODE)
-#define TOKEN_AUTH_REDIS_IP							"127.0.0.1"
+#define TOKEN_AUTH_REDIS_IP							"10.0.2.2"
 #define TOKEN_AUTH_REDIS_PORT						6379							
 #endif
 

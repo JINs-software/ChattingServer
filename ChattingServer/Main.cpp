@@ -3,6 +3,34 @@
 #include <time.h>
 
 int main() {
+	std::cout << "Priority Boost: ";
+	int prior;
+	std::cin >> prior;
+	//ABOVE_NORMAL_PRIORITY_CLASS: 높은 우선순위
+	//HIGH_PRIORITY_CLASS : 매우 높은 우선순위
+	if (prior == 1) {
+		HANDLE hProcess = GetCurrentProcess();
+
+		// 프로세스 우선순위를 REALTIME_PRIORITY_CLASS로 설정합니다.
+		if (SetPriorityClass(hProcess, ABOVE_NORMAL_PRIORITY_CLASS)) {
+			std::cout << "Process priority successfully set to REALTIME_PRIORITY_CLASS." << std::endl;
+		}
+		else {
+			std::cerr << "Failed to set process priority." << std::endl;
+		}
+	}
+	else if (prior == 2) {
+		HANDLE hProcess = GetCurrentProcess();
+
+		// 프로세스 우선순위를 REALTIME_PRIORITY_CLASS로 설정합니다.
+		if (SetPriorityClass(hProcess, HIGH_PRIORITY_CLASS)) {
+			std::cout << "Process priority successfully set to REALTIME_PRIORITY_CLASS." << std::endl;
+		}
+		else {
+			std::cerr << "Failed to set process priority." << std::endl;
+		}
+	}
+
 	ChattingServer chatserver(
 		NULL, CHAT_SERV_PORT, 
 		0, IOCP_WORKER_THREAD_CNT, CHAT_SERV_LIMIT_ACCEPTANCE,
@@ -10,7 +38,7 @@ int main() {
 		CHAT_SERIAL_BUFFER_SIZE,
 		CHAT_SERV_SESSION_RECV_BUFF_SIZE,
 		dfPACKET_CODE, dfPACKET_KEY,
-		true
+		RECV_BUFFERING_MODE
 	);
 
 	if (!chatserver.Start()) {
