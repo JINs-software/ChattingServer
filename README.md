@@ -1,6 +1,6 @@
 ### \[채팅 서버 성능/오류 테스트\]
 * 7일간의 채팅 성능 테스트
-  ![image](https://github.com/user-attachments/assets/70467fac-0ad4-45ed-88ba-68586b71b5de)
+  ![image](https://github.com/user-attachments/assets/b1c78a96-d0fa-4ed7-96c6-583f00754ec7)
 
 #### 테스트 조건
 * 메모리 사용량 500MB 이하
