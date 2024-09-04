@@ -1,6 +1,7 @@
 ### \[채팅 서버 성능/오류 테스트\]
 * 7일간의 채팅 성능 테스트
-  
+  ![image](https://github.com/user-attachments/assets/ffbbcef5-1b69-4a91-9a5d-d06c24a1102b)
+
 #### 테스트 조건
 * 메모리 사용량 500MB 이하
 * Update Thread Message TPS: 12000 ~ 16000 내외로 유지
